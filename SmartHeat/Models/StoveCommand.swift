@@ -1,24 +1,17 @@
 import Foundation
 
-/// Represents a 4HEAT protocol command (18 characters)
+/// Represents a Dielle 4HEAT 2ways protocol command
 struct StoveCommand: Codable, Equatable {
     let rawString: String
     
     init(rawString: String) {
-        if rawString == "SEL0" {
-            self.rawString = rawString
-        } else if rawString.count < 18 {
-            let padding = String(repeating: "0", count: 18 - rawString.count)
-            self.rawString = rawString + padding
-        } else {
-            self.rawString = String(rawString.prefix(18))
-        }
+        self.rawString = rawString
     }
     
-    // Core Commands (Power) - 4Heat Dielle standard J30001
-    static let turnOn = StoveCommand(rawString: "J300010000000001")
-    static let turnOff = StoveCommand(rawString: "J300010000000000")
-    static let unlock = StoveCommand(rawString: "J30255000000000001")
+    // Core Commands (Power) - Exact 2ways Dielle FileMap specification for device 25016460
+    static let turnOn = StoveCommand(rawString: "05040000")
+    static let turnOff = StoveCommand(rawString: "05050000")
+    static let unlock = StoveCommand(rawString: "05050000")
     
     // Read Registers (Status & Temps)
     static let readStatus = StoveCommand(rawString: "I30001000000000000")
@@ -29,11 +22,9 @@ struct StoveCommand: Codable, Equatable {
     
     static let selAll = StoveCommand(rawString: "SEL0")
     
-    /// Create a WRITE parameter command (B prefix)
+    /// Create a WRITE parameter command for 2ways Dielle (050e01ed + 4-digit hex)
     static func writeParameter(id: String, value: Int) -> StoveCommand {
-        // Value must be 12 digits padded with zeros
-        let valueString = String(format: "%012d", value)
-        // Command is B + 5-digit ID + 12-digit value = 18 chars
-        return StoveCommand(rawString: "B\(id)\(valueString)")
+        let hexVal = String(format: "%04x", value)
+        return StoveCommand(rawString: "050e01ed\(hexVal)")
     }
 }
