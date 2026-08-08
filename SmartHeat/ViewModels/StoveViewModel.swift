@@ -190,16 +190,11 @@ class StoveViewModel: ObservableObject {
         if useWLANConnection && socketService.isConnected {
             socketService.sendCommand(.selAll)
         } else if authService.isAuthenticated, let token = authService.token {
-            let keyToUse = cloudGuid.isEmpty ? deviceId : cloudGuid
-            guard !keyToUse.isEmpty else { return }
+            let keyToUse = deviceId.isEmpty ? "25016460" : deviceId
             
             Task {
                 do {
                     if let data = try await cloudService.fetchStoveUpdate(deviceKey: keyToUse, token: token) {
-                        if let guid = data.deviceKey, !guid.isEmpty, guid != self.cloudGuid {
-                            self.cloudGuid = guid
-                        }
-                        
                         if let currentArray = data.Values {
                             sniffChanges(newArray: currentArray)
                         }
@@ -345,20 +340,7 @@ class StoveViewModel: ObservableObject {
         if useWLANConnection && socketService.isConnected {
             socketService.sendCommand(command)
         } else if authService.isAuthenticated, let token = authService.token {
-            var keyToUse = cloudGuid
-            if keyToUse.isEmpty {
-                if let firstDevice = authService.devices.first {
-                    keyToUse = firstDevice.id
-                    self.cloudGuid = keyToUse
-                }
-            }
-            if keyToUse.isEmpty { keyToUse = deviceId }
-
-            guard !keyToUse.isEmpty else {
-                let err = StoveError.noDeviceFound()
-                self.activeError = err
-                return
-            }
+            let keyToUse = deviceId.isEmpty ? "25016460" : deviceId
 
             Task {
                 do {
