@@ -1,0 +1,13 @@
+// Dein Apple Development Team ID
+DEVELOPMENT_TEAM = LGZQ97NNLQ
+
+// Die Bundle Identifier für deine App (Mars-Konvention)
+PRODUCT_BUNDLE_IDENTIFIER = com.mars.SmartHeat
+
+// Automatisches Signing aktivieren
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_IDENTITY = Apple Development
+
+// iOS Deployment Target (Unterstützung ab 16.7.15)
+IPHONEOS_DEPLOYMENT_TARGET = 16.7.15
+TARGETED_DEVICE_FAMILY = 1,2
