@@ -47,6 +47,17 @@ class StoveViewModel: ObservableObject {
         didSet { UserDefaults.standard.set(stovePin, forKey: "saved_stove_pin") }
     }
     
+    // Toggle for WLAN direct mode (Default: false -> Pure Cloud Mode)
+    @Published var useWLANConnection: Bool = UserDefaults.standard.object(forKey: "use_wlan_connection") as? Bool ?? false {
+        didSet {
+            UserDefaults.standard.set(useWLANConnection, forKey: "use_wlan_connection")
+            if !useWLANConnection {
+                socketService.disconnect()
+                discoveryService.stopDiscovery()
+            }
+        }
+    }
+    
     @Published var lastRawMessage: String = ""
     
     private var lastUserInteraction: Date = Date.distantPast
@@ -80,7 +91,7 @@ class StoveViewModel: ObservableObject {
                 if !self.socketService.isConnected {
                     self.socketService.connect(host: "127.0.0.1", port: 8080)
                 }
-            } else if !self.socketService.isConnected && !self.manualIP.isEmpty && self.manualIP != "192.168.178.1" {
+            } else if self.useWLANConnection && !self.socketService.isConnected && !self.manualIP.isEmpty && self.manualIP != "192.168.178.1" {
                 self.socketService.connect(host: self.manualIP)
             }
         }
@@ -176,7 +187,7 @@ class StoveViewModel: ObservableObject {
     }
     
     func refreshData() {
-        if socketService.isConnected {
+        if useWLANConnection && socketService.isConnected {
             socketService.sendCommand(.selAll)
         } else if authService.isAuthenticated, let token = authService.token {
             let keyToUse = cloudGuid.isEmpty ? deviceId : cloudGuid
@@ -214,10 +225,12 @@ class StoveViewModel: ObservableObject {
                             }
                         }
                     } else {
-                        // Cloud returned empty array for this user -> Trigger local WLAN discovery fallback
-                        if !self.discoveryService.isScanning && !self.socketService.isConnected {
+                        // Cloud returned empty array for this user
+                        if useWLANConnection && !self.discoveryService.isScanning && !self.socketService.isConnected {
                             self.lastRawMessage = "Keine Cloud-Daten. Suche Ofen im WLAN..."
                             self.discoveryService.discoverStove()
+                        } else {
+                            self.lastRawMessage = "Cloud: Warte auf Azure-Antwort (ID: \(deviceId))..."
                         }
                     }
                 } catch {
@@ -329,7 +342,7 @@ class StoveViewModel: ObservableObject {
     }
     
     private func sendUniversal(command: StoveCommand) {
-        if socketService.isConnected {
+        if useWLANConnection && socketService.isConnected {
             socketService.sendCommand(command)
         } else if authService.isAuthenticated, let token = authService.token {
             var keyToUse = cloudGuid

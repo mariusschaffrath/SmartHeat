@@ -138,41 +138,50 @@ struct SettingsView: View {
                     }
                 }
                 
-                Section(header: Text("Lokale Verbindung (WLAN)")) {
-                    HStack {
-                        TextField("Manuelle IP", text: $viewModel.manualIP)
-                            .keyboardType(.numbersAndPunctuation)
-                            .autocapitalization(.none)
-                            .disableAutocorrection(true)
-                            .onChange(of: viewModel.manualIP) { newValue in
-                                let filtered = newValue.replacingOccurrences(of: ",", with: ".")
-                                if filtered != newValue {
-                                    viewModel.manualIP = filtered
+                Section(header: Text("Lokale Direktverbindung (WLAN)")) {
+                    Toggle("WLAN-Direktverbindung verwenden", isOn: $viewModel.useWLANConnection)
+                        .tint(.blue)
+                    
+                    if !viewModel.useWLANConnection {
+                        Text("🔒 WLAN-Direktmodus ist deaktiviert. Die App kommuniziert ausschließlich über die Cloud (myDielle / 4Heat).")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else {
+                        HStack {
+                            TextField("Manuelle IP", text: $viewModel.manualIP)
+                                .keyboardType(.numbersAndPunctuation)
+                                .autocapitalization(.none)
+                                .disableAutocorrection(true)
+                                .onChange(of: viewModel.manualIP) { newValue in
+                                    let filtered = newValue.replacingOccurrences(of: ",", with: ".")
+                                    if filtered != newValue {
+                                        viewModel.manualIP = filtered
+                                    }
+                                }
+                            Button("Verbinden") {
+                                viewModel.socketService.connect(host: viewModel.manualIP)
+                            }
+                        }
+                        
+                        HStack {
+                            Label("WLAN Status", systemImage: "wifi")
+                            Spacer()
+                            StatusIndicator(isActive: viewModel.socketService.isConnected)
+                        }
+                        
+                        Button(action: {
+                            viewModel.discoveryService.discoverStove()
+                        }) {
+                            HStack {
+                                Label(viewModel.discoveryService.isScanning ? "Suche läuft..." : "Automatisch suchen", systemImage: "magnifyingglass")
+                                if viewModel.discoveryService.isScanning {
+                                    Spacer()
+                                    ProgressView()
                                 }
                             }
-                        Button("Verbinden") {
-                            viewModel.socketService.connect(host: viewModel.manualIP)
                         }
+                        .disabled(viewModel.discoveryService.isScanning)
                     }
-                    
-                    HStack {
-                        Label("WLAN Status", systemImage: "wifi")
-                        Spacer()
-                        StatusIndicator(isActive: viewModel.socketService.isConnected)
-                    }
-                    
-                    Button(action: {
-                        viewModel.discoveryService.discoverStove()
-                    }) {
-                        HStack {
-                            Label(viewModel.discoveryService.isScanning ? "Suche läuft..." : "Automatisch suchen", systemImage: "magnifyingglass")
-                            if viewModel.discoveryService.isScanning {
-                                Spacer()
-                                ProgressView()
-                            }
-                        }
-                    }
-                    .disabled(viewModel.discoveryService.isScanning)
                 }
                 
                 Section(header: Text("Discovery Logs")) {
