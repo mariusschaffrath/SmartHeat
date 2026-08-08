@@ -96,9 +96,8 @@ class CloudService: ObservableObject {
                         }
                     }
                 } else if statusCode == 401 {
-                    let err = StoveError.sessionExpired()
-                    self.activeError = err
-                    throw err
+                    print("DEBUG: Cloud endpoint returned 401 for \(url). Trying fallback endpoints...")
+                    continue
                 }
             } catch let err as StoveError {
                 throw err

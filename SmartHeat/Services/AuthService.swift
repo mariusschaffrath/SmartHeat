@@ -68,10 +68,12 @@ class AuthService: ObservableObject {
                    let token = json["access_token"] as? String {
                     self.token = token
                     self.isAuthenticated = true
+                    self.activeError = nil
                     UserDefaults.standard.set(token, forKey: "cloud_token")
                     
                     // Safely attempt device fetch without breaking valid token login
                     try? await fetchDevices()
+                    self.activeError = nil
                     return
                 }
             } else if statusCode == 400 || statusCode == 401 {
@@ -137,8 +139,8 @@ class AuthService: ObservableObject {
                         }
                     }
                 } else if statusCode == 401 {
-                    self.activeError = StoveError.sessionExpired()
-                    throw StoveError.sessionExpired()
+                    print("DEBUG: Probe endpoint \(ep) returned 401 (restricted). Continuing to fallback.")
+                    continue
                 }
             } catch let err as StoveError {
                 throw err
