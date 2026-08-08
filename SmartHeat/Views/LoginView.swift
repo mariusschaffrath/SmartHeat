@@ -4,8 +4,13 @@ struct LoginView: View {
     @ObservedObject var authService: AuthService
     @State private var email = ""
     @State private var password = ""
+    @State private var showPassword = false
     @State private var isLoading = false
     @State private var errorMessage: String?
+    
+    // Tap counter for hidden Simulator skip button
+    @State private var setupTapCount = 0
+    @State private var showSimulatorSkip = false
     
     @FocusState private var focusedField: Field?
     
@@ -56,12 +61,26 @@ struct LoginView: View {
                                     .font(.caption)
                                     .bold()
                                     .foregroundColor(.secondary)
-                                SecureField("••••••••", text: $password)
-                                    .padding()
-                                    .background(Color.gray.opacity(0.1))
-                                    .cornerRadius(10)
-                                    .focused($focusedField, equals: .password)
-                                    .submitLabel(.done)
+                                HStack {
+                                    if showPassword {
+                                        TextField("Passwort", text: $password)
+                                            .textInputAutocapitalization(.never)
+                                            .disableAutocorrection(true)
+                                            .focused($focusedField, equals: .password)
+                                    } else {
+                                        SecureField("••••••••", text: $password)
+                                            .focused($focusedField, equals: .password)
+                                    }
+                                    
+                                    Button(action: { showPassword.toggle() }) {
+                                        Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
+                                            .foregroundColor(.gray)
+                                    }
+                                }
+                                .padding()
+                                .background(Color.gray.opacity(0.1))
+                                .cornerRadius(10)
+                                .submitLabel(.done)
                             }
                         }
                         .padding(.horizontal, 30)
@@ -79,32 +98,48 @@ struct LoginView: View {
                             .padding(.horizontal, 30)
                         }
                         
-                        Button(action: {
-                            performLogin()
-                        }) {
-                            HStack {
-                                if isLoading {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                        .padding(.trailing, 10)
+                        VStack(spacing: 12) {
+                            Button(action: handleLoginTap) {
+                                HStack {
+                                    if isLoading {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                            .padding(.trailing, 10)
+                                    }
+                                    Text(isLoading ? "Anmeldung..." : "Anmelden")
+                                        .bold()
                                 }
-                                Text(isLoading ? "Anmeldung..." : "Anmelden")
-                                    .bold()
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(email.isEmpty || password.isEmpty || isLoading ? Color.gray : Color.orange)
+                                .foregroundColor(.white)
+                                .cornerRadius(12)
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(email.isEmpty || password.isEmpty || isLoading ? Color.gray : Color.orange)
-                            .foregroundColor(.white)
-                            .cornerRadius(12)
+                            .disabled(email.isEmpty || password.isEmpty || isLoading)
+                            
+                            if showSimulatorSkip {
+                                Button(action: skipToSimulator) {
+                                    HStack {
+                                        Image(systemName: "bolt.horizontal.fill")
+                                        Text("🧪 Im Simulator-Modus fortfahren (Skip)")
+                                            .bold()
+                                    }
+                                    .font(.footnote)
+                                    .foregroundColor(.purple)
+                                    .padding()
+                                    .frame(maxWidth: .infinity)
+                                    .background(Color.purple.opacity(0.12))
+                                    .cornerRadius(12)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(Color.purple.opacity(0.3), lineWidth: 1)
+                                    )
+                                }
+                                .transition(.scale.combined(with: .opacity))
+                            }
                         }
-                        .disabled(email.isEmpty || password.isEmpty || isLoading)
                         .padding(.horizontal, 30)
                         .padding(.top, 10)
-                        
-                        Text("Hilfe benötigt? Support kontaktieren")
-                            .font(.footnote)
-                            .foregroundColor(.blue)
-                            .padding(.top, 20)
                     }
                 }
             }
@@ -116,15 +151,27 @@ struct LoginView: View {
                 if focusedField == .email {
                     focusedField = .password
                 } else {
-                    performLogin()
+                    handleLoginTap()
                 }
             }
         }
     }
     
+    private func handleLoginTap() {
+        setupTapCount += 1
+        if setupTapCount >= 3 {
+            withAnimation {
+                showSimulatorSkip = true
+            }
+        }
+        performLogin()
+    }
+    
     private func performLogin() {
-        // Validation
-        if !email.contains("@") || email.count < 5 {
+        let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if !cleanEmail.contains("@") || cleanEmail.count < 5 {
             errorMessage = "Bitte geben Sie eine gültige Email-Adresse ein."
             return
         }
@@ -135,12 +182,21 @@ struct LoginView: View {
         
         Task {
             do {
-                try await authService.login(email: email, password: password)
+                try await authService.login(email: cleanEmail, password: cleanPassword)
                 isLoading = false
             } catch {
                 errorMessage = "Login fehlgeschlagen: \(error.localizedDescription)"
                 isLoading = false
             }
+        }
+    }
+    
+    private func skipToSimulator() {
+        withAnimation {
+            authService.isAuthenticated = true
+            let dummyEmail = email.isEmpty ? "simulator@smartheat.local" : email
+            KeychainService.shared.save(dummyEmail, key: "cloud_email")
+            KeychainService.shared.save("simulator123", key: "cloud_password")
         }
     }
 }

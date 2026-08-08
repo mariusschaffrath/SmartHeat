@@ -45,13 +45,18 @@ class AuthService: ObservableObject {
     
     func login(email: String, password: String) async throws {
         self.activeError = nil
+        let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        
         let tokenURL = URL(string: "\(baseURL)/Token")!
         
         var request = URLRequest(url: tokenURL)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         
-        let body = "grant_type=password&username=\(email.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? email)&password=\(password.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? password)"
+        let encodedEmail = cleanEmail.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? cleanEmail
+        let encodedPassword = cleanPassword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? cleanPassword
+        let body = "grant_type=password&username=\(encodedEmail)&password=\(encodedPassword)"
         request.httpBody = body.data(using: .utf8)
         
         do {
@@ -65,8 +70,8 @@ class AuthService: ObservableObject {
                     self.isAuthenticated = true
                     UserDefaults.standard.set(token, forKey: "cloud_token")
                     
-                    // Fetch registered devices from Cloud
-                    try await fetchDevices()
+                    // Safely attempt device fetch without breaking valid token login
+                    try? await fetchDevices()
                     return
                 }
             } else if statusCode == 400 || statusCode == 401 {

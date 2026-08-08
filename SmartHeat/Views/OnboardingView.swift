@@ -4,8 +4,13 @@ struct OnboardingView: View {
     @ObservedObject var viewModel: StoveViewModel
     @State private var email = ""
     @State private var password = ""
+    @State private var showPassword = false
     @State private var isAuthenticating = false
     @State private var errorMessage: String?
+    
+    // Tap counter for hidden Simulator skip button
+    @State private var setupTapCount = 0
+    @State private var showSimulatorSkip = false
     
     var body: some View {
         ZStack {
@@ -17,72 +22,112 @@ struct OnboardingView: View {
                 .frame(width: 400, height: 400)
                 .offset(x: 150, y: -350)
             
-            VStack(spacing: 40) {
+            VStack(spacing: 30) {
                 Spacer()
                 
-                VStack(spacing: 20) {
+                VStack(spacing: 16) {
                     Image(systemName: "flame.fill")
-                        .font(.system(size: 80))
+                        .font(.system(size: 70))
                         .foregroundStyle(
                             LinearGradient(colors: [.orange, .red], startPoint: .top, endPoint: .bottom)
                         )
-                        .shadow(color: .orange.opacity(0.3), radius: 20, x: 0, y: 10)
+                        .shadow(color: .orange.opacity(0.3), radius: 15, x: 0, y: 8)
                     
                     Text("SmartHeat")
-                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
                     
                     Text("Ihr Zuhause, perfekt temperiert.")
-                        .font(.title3)
+                        .font(.subheadline)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                 }
                 
-                VStack(spacing: 20) {
+                VStack(spacing: 16) {
                     VStack(spacing: 0) {
                         TextField("E-Mail", text: $email)
                             .padding()
                             .background(Color(uiColor: .secondarySystemBackground))
                             .keyboardType(.emailAddress)
                             .autocapitalization(.none)
+                            .disableAutocorrection(true)
                         
                         Divider().padding(.horizontal)
                         
-                        SecureField("Passwort", text: $password)
-                            .padding()
-                            .background(Color(uiColor: .secondarySystemBackground))
+                        HStack {
+                            if showPassword {
+                                TextField("Passwort", text: $password)
+                                    .autocapitalization(.none)
+                                    .disableAutocorrection(true)
+                            } else {
+                                SecureField("Passwort", text: $password)
+                            }
+                            
+                            Button(action: { showPassword.toggle() }) {
+                                Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
+                                    .foregroundColor(.gray)
+                                    .padding(.trailing, 8)
+                            }
+                        }
+                        .padding()
+                        .background(Color(uiColor: .secondarySystemBackground))
                     }
                     .cornerRadius(16)
                     .overlay(
                         RoundedRectangle(cornerRadius: 16)
-                            .stroke(Color.gray.opacity(0.1), lineWidth: 1)
+                            .stroke(Color.gray.opacity(0.15), lineWidth: 1)
                     )
                     
                     if let error = errorMessage {
                         Text(error)
                             .font(.footnote)
                             .foregroundColor(.red)
+                            .multilineTextAlignment(.center)
                             .transition(.opacity)
                     }
                 }
                 .padding(.horizontal, 30)
                 
-                Button(action: startSetup) {
-                    HStack {
-                        if isAuthenticating {
-                            ProgressView().tint(.white)
-                                .padding(.trailing, 8)
+                VStack(spacing: 12) {
+                    Button(action: handleSetupTap) {
+                        HStack {
+                            if isAuthenticating {
+                                ProgressView().tint(.white)
+                                    .padding(.trailing, 8)
+                            }
+                            Text(isAuthenticating ? "Verbindung wird hergestellt..." : "Einrichtung starten")
+                                .fontWeight(.bold)
                         }
-                        Text(isAuthenticating ? "Verbindung wird hergestellt..." : "Einrichtung starten")
-                            .fontWeight(.bold)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(email.isEmpty || password.isEmpty ? Color.gray.opacity(0.3) : Color.orange)
+                        .foregroundColor(.white)
+                        .cornerRadius(16)
+                        .shadow(color: .orange.opacity(email.isEmpty ? 0 : 0.3), radius: 10, x: 0, y: 5)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 18)
-                    .background(email.isEmpty || password.isEmpty ? Color.gray.opacity(0.3) : Color.orange)
-                    .foregroundColor(.white)
-                    .cornerRadius(16)
-                    .shadow(color: .orange.opacity(email.isEmpty ? 0 : 0.3), radius: 10, x: 0, y: 5)
+                    .disabled(email.isEmpty || password.isEmpty || isAuthenticating)
+                    
+                    // Hidden Skip Button (appears after 3 taps on setup button)
+                    if showSimulatorSkip {
+                        Button(action: skipToSimulator) {
+                            HStack {
+                                Image(systemName: "bolt.horizontal.fill")
+                                Text("🧪 Im Simulator-Modus fortfahren (Skip)")
+                                    .fontWeight(.bold)
+                            }
+                            .font(.footnote)
+                            .foregroundColor(.purple)
+                            .padding(.vertical, 12)
+                            .frame(maxWidth: .infinity)
+                            .background(Color.purple.opacity(0.12))
+                            .cornerRadius(12)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.purple.opacity(0.3), lineWidth: 1)
+                            )
+                        }
+                        .transition(.scale.combined(with: .opacity))
+                    }
                 }
-                .disabled(email.isEmpty || password.isEmpty || isAuthenticating)
                 .padding(.horizontal, 30)
                 
                 Spacer()
@@ -93,6 +138,16 @@ struct OnboardingView: View {
                     .padding(.bottom, 10)
             }
         }
+    }
+    
+    private func handleSetupTap() {
+        setupTapCount += 1
+        if setupTapCount >= 3 {
+            withAnimation {
+                showSimulatorSkip = true
+            }
+        }
+        startSetup()
     }
     
     private func startSetup() {
@@ -109,10 +164,20 @@ struct OnboardingView: View {
                 withAnimation { isAuthenticating = false }
             } catch {
                 withAnimation {
-                    errorMessage = "Login fehlgeschlagen. Bitte prüfen Sie Ihre Daten."
+                    errorMessage = "Login fehlgeschlagen. Bitte prüfen Sie Ihre Zugangsdaten."
                     isAuthenticating = false
                 }
             }
+        }
+    }
+    
+    private func skipToSimulator() {
+        withAnimation {
+            viewModel.isSimulatorMode = true
+            viewModel.authService.isAuthenticated = true
+            let dummyEmail = email.isEmpty ? "simulator@smartheat.local" : email
+            KeychainService.shared.save(dummyEmail, key: "cloud_email")
+            KeychainService.shared.save("simulator123", key: "cloud_password")
         }
     }
 }
