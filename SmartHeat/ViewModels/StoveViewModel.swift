@@ -42,6 +42,11 @@ class StoveViewModel: ObservableObject {
         didSet { UserDefaults.standard.set(cloudGuid, forKey: "saved_cloud_guid") }
     }
     
+    // 6-digit Stove PIN
+    @Published var stovePin: String = UserDefaults.standard.string(forKey: "saved_stove_pin") ?? "270962" {
+        didSet { UserDefaults.standard.set(stovePin, forKey: "saved_stove_pin") }
+    }
+    
     @Published var lastRawMessage: String = ""
     
     private var lastUserInteraction: Date = Date.distantPast

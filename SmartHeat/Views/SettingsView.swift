@@ -52,15 +52,33 @@ struct SettingsView: View {
                                         .font(.caption)
                                         .foregroundColor(.secondary)
                                     
-                                    VStack(alignment: .leading, spacing: 5) {
-                                        Text("Manuelle Device-ID (GUID):")
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Ofen-Zugangsdaten (myDielle / 4Heat):")
                                             .font(.caption2).bold()
+                                        
                                         HStack {
+                                            Text("Seriennummer / ID:").font(.caption)
+                                            Spacer()
                                             TextField("ID eingeben...", text: $viewModel.deviceId)
                                                 .font(.system(size: 12, design: .monospaced))
                                                 .textFieldStyle(.roundedBorder)
+                                                .frame(width: 140)
                                                 .autocapitalization(.none)
                                                 .disableAutocorrection(true)
+                                        }
+                                        
+                                        HStack {
+                                            Text("PIN-Code:").font(.caption)
+                                            Spacer()
+                                            TextField("PIN eingeben...", text: $viewModel.stovePin)
+                                                .font(.system(size: 12, design: .monospaced))
+                                                .textFieldStyle(.roundedBorder)
+                                                .frame(width: 140)
+                                                .keyboardType(.numberPad)
+                                        }
+                                        
+                                        HStack {
+                                            Spacer()
                                             Button("Speichern") {
                                                 dismiss()
                                             }
