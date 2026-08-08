@@ -24,6 +24,14 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                 }
 
+                Section(header: Text("🧪 Simulator / Gegenspieler (Testmodus)")) {
+                    Toggle("Simulator-Modus verwenden", isOn: $viewModel.isSimulatorMode)
+                        .tint(.purple)
+                    Text("Verbindet mit dem lokalen Ofen- & Cloud-Simulator auf 127.0.0.1 zum Testen ohne echten Ofen.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
                 Section(header: Text("Cloud Anbindung")) {
                     if viewModel.authService.isAuthenticated {
                         VStack(alignment: .leading, spacing: 10) {

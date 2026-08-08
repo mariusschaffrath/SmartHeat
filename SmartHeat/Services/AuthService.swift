@@ -37,7 +37,11 @@ class AuthService: ObservableObject {
     @Published var activeError: StoveError?
     @Published var devices: [StoveDevice] = []
     
-    private let baseURL = "https://wifi4heat.azurewebsites.net"
+    private(set) public var baseURL = "https://wifi4heat.azurewebsites.net"
+    
+    func setBaseURL(_ url: String) {
+        self.baseURL = url
+    }
     
     func login(email: String, password: String) async throws {
         self.activeError = nil

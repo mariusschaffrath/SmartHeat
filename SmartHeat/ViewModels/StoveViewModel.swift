@@ -21,6 +21,13 @@ class StoveViewModel: ObservableObject {
     
     private let interactionLockDuration: TimeInterval = 25.0
     
+    @Published var isSimulatorMode: Bool = UserDefaults.standard.bool(forKey: "is_simulator_mode") {
+        didSet {
+            UserDefaults.standard.set(isSimulatorMode, forKey: "is_simulator_mode")
+            configureEndpoints()
+        }
+    }
+    
     @Published var isWaterStove: Bool = UserDefaults.standard.bool(forKey: "is_water_stove") {
         didSet { UserDefaults.standard.set(isWaterStove, forKey: "is_water_stove") }
     }
@@ -58,13 +65,31 @@ class StoveViewModel: ObservableObject {
     init() {
         setupSubscriptions()
         loadSavedData()
+        configureEndpoints()
         startPolling()
         attemptAutoLogin()
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             guard let self = self else { return }
-            if !self.socketService.isConnected && !self.manualIP.isEmpty {
+            if self.isSimulatorMode {
+                if !self.socketService.isConnected {
+                    self.socketService.connect(host: "127.0.0.1", port: 8080)
+                }
+            } else if !self.socketService.isConnected && !self.manualIP.isEmpty {
                 self.socketService.connect(host: self.manualIP)
+            }
+        }
+    }
+    
+    func configureEndpoints() {
+        let cloudBase = isSimulatorMode ? "http://127.0.0.1:8000" : "https://wifi4heat.azurewebsites.net"
+        authService.setBaseURL(cloudBase)
+        cloudService.setBaseURL("\(cloudBase)/api/devices")
+        print("CONFIG: Endpunkte gesetzt auf \(cloudBase) (Simulator: \(isSimulatorMode))")
+        if isSimulatorMode {
+            self.cloudGuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            if !socketService.isConnected {
+                socketService.connect(host: "127.0.0.1", port: 8080)
             }
         }
     }

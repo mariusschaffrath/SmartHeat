@@ -60,7 +60,11 @@ class CloudService: ObservableObject {
     @Published var lastCloudResponse: String = ""
     @Published var activeError: StoveError?
     
-    private let baseURL = "https://wifi4heat.azurewebsites.net/api/devices"
+    private(set) public var baseURL = "https://wifi4heat.azurewebsites.net/api/devices"
+    
+    func setBaseURL(_ url: String) {
+        self.baseURL = url
+    }
     
     /// Fetches live stove telemetry from Cloud using the 36-character DeviceKey GUID
     func fetchStoveUpdate(deviceKey: String, token: String) async throws -> CloudStoveData? {
