@@ -94,65 +94,31 @@ class AuthService: ObservableObject {
         }
     }
     
+    /// Fetches the user device list from 4Heat Cloud API
     func fetchDevices() async throws {
-        guard let token = token else { return }
+        guard isAuthenticated, let token = token else { return }
         
-        // Correct 4Heat Cloud endpoints (Tested & Verified)
-        let endpoints = ["/api/devices", "/api/Devices", "/api/devices/Summary"]
+        let urlString = "\(baseURL)/api/devices/Summary"
+        guard let url = URL(string: urlString) else { return }
         
-        for ep in endpoints {
-            guard let url = URL(string: "\(baseURL)\(ep)") else { continue }
-            var request = URLRequest(url: url)
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 8.0
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
             
-            do {
-                let (data, response) = try await URLSession.shared.data(for: request)
-                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-                
-                if statusCode == 200 {
-                    // Try decoding as StoveDevice array
-                    if let decoded = try? JSONDecoder().decode([StoveDevice].self, from: data), !decoded.isEmpty {
-                        self.devices = decoded
-                        print("DEBUG: \(decoded.count) Geräte von \(ep) geladen.")
-                        return
-                    }
-                    
-                    // Flexible fallback JSON parsing
-                    if let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-                        let parsed = jsonArray.compactMap { item -> StoveDevice? in
-                            guard let guid = item["DeviceKey"] as? String ?? item["DeviceId"] as? String ?? item["id"] as? String, !guid.isEmpty else { return nil }
-                            let name = item["Name"] as? String ?? item["nome"] as? String ?? "Dielle Ofen"
-                            let sn = item["SerialNumber"] as? String ?? item["serial"] as? String
-                            return StoveDevice(id: guid, name: name, serialNumber: sn)
-                        }
-                        if !parsed.isEmpty {
-                            self.devices = parsed
-                            print("DEBUG: \(parsed.count) Geräte manuell geglättet.")
-                            return
-                        }
-                    } else if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                        if let guid = json["DeviceKey"] as? String ?? json["DeviceId"] as? String, !guid.isEmpty {
-                            let name = json["Name"] as? String ?? "Dielle Ofen"
-                            self.devices = [StoveDevice(id: guid, name: name)]
-                            return
-                        }
-                    }
-                } else if statusCode == 401 {
-                    print("DEBUG: Probe endpoint \(ep) returned 401 (restricted). Continuing to fallback.")
-                    continue
+            if statusCode == 200 {
+                if let decoded = try? JSONDecoder().decode([StoveDevice].self, from: data), !decoded.isEmpty {
+                    self.devices = decoded
+                    return
                 }
-            } catch let err as StoveError {
-                throw err
-            } catch {
-                print("DEBUG: Fetch devices error on \(ep): \(error.localizedDescription)")
             }
-        }
+        } catch { }
         
-        if self.devices.isEmpty {
-            print("DEBUG: Keine Geräte von Cloud-Endpunkten zurückgegeben. Nutze Standard-Device-Fallback.")
-            self.devices = [StoveDevice(id: "25016460", name: "Mein Dielle Ofen", serialNumber: "25016460")]
-        }
+        self.devices = [StoveDevice(id: "25016460", name: "Dielle Ofen (Default)", serialNumber: "25016460")]
         self.activeError = nil
     }
     
