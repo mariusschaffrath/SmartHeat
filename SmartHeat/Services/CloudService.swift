@@ -66,12 +66,16 @@ class CloudService: ObservableObject {
         self.baseURL = url
     }
     
-    /// Fetches live stove telemetry from Cloud using the 36-character DeviceKey GUID
+    /// Fetches live stove telemetry from Cloud using official Dielle REST endpoints (/RealTime?id= and /Summary?ids=)
     func fetchStoveUpdate(deviceKey: String, token: String) async throws -> CloudStoveData? {
         self.activeError = nil
         
-        // Correct 4Heat Azure REST endpoint: /Summary?id={deviceKey}
-        let endpoints = ["/Summary?id=\(deviceKey)"]
+        // Exact endpoints reverse-engineered from official Dielle app (com.ionicframework.dielle389999)
+        let endpoints = [
+            "/RealTime?id=\(deviceKey)",
+            "/Summary?ids=\(deviceKey)",
+            "/Summary?id=\(deviceKey)"
+        ]
         
         for ep in endpoints {
             guard let url = URL(string: "\(baseURL)\(ep)") else { continue }
@@ -86,7 +90,7 @@ class CloudService: ObservableObject {
                 let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
                 
                 if statusCode == 200 {
-                    if let jsonString = String(data: data, encoding: .utf8), jsonString != "[]" {
+                    if let jsonString = String(data: data, encoding: .utf8), jsonString != "[]" && !jsonString.isEmpty {
                         self.lastCloudResponse = jsonString
                         
                         if let decoded = try? JSONDecoder().decode(CloudStoveData.self, from: data) {
@@ -96,7 +100,7 @@ class CloudService: ObservableObject {
                         }
                     }
                 } else if statusCode == 401 {
-                    print("DEBUG: Cloud endpoint returned 401 for \(url). Trying fallback endpoints...")
+                    print("DEBUG: Cloud endpoint returned 401 for \(url).")
                     continue
                 }
             } catch let err as StoveError {
@@ -109,7 +113,7 @@ class CloudService: ObservableObject {
         return nil
     }
     
-    /// Sends a command to the stove via Cloud API
+    /// Sends a command to the stove via Cloud API (using official Dielle payload format { "id": "...", "comando": ["1", "..."] })
     func sendCommand(deviceKey: String, token: String, command: StoveCommand) async throws {
         self.activeError = nil
         
@@ -120,12 +124,13 @@ class CloudService: ObservableObject {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 10.0
         
+        // Exact payload format from official Dielle app controllers.js
         let body: [String: Any] = [
-            "DeviceId": deviceKey,
-            "Comando": ["1", command.rawString]
+            "id": deviceKey,
+            "comando": ["1", command.rawString]
         ]
         
-        print("CLOUD SENDING to GUID \(deviceKey): \(command.rawString)")
+        print("CLOUD SENDING to ID \(deviceKey): \(command.rawString)")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
         do {
