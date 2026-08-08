@@ -70,8 +70,8 @@ class CloudService: ObservableObject {
     func fetchStoveUpdate(deviceKey: String, token: String) async throws -> CloudStoveData? {
         self.activeError = nil
         
-        // Correct 4Heat Azure REST endpoints: Summary and direct device queries
-        let endpoints = ["/Summary?id=\(deviceKey)", "?id=\(deviceKey)", "/Summary?ids=\(deviceKey)"]
+        // Correct 4Heat Azure REST endpoint: /Summary?id={deviceKey}
+        let endpoints = ["/Summary?id=\(deviceKey)"]
         
         for ep in endpoints {
             guard let url = URL(string: "\(baseURL)\(ep)") else { continue }
