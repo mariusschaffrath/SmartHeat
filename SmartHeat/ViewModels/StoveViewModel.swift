@@ -199,6 +199,7 @@ class StoveViewModel: ObservableObject {
                             self.waterTemp = mapped.water
                             self.waterPressure = mapped.pressure
                             updateStatusLabel(mapped.status)
+                            self.lastRawMessage = "Cloud Live-Daten empfangen."
                         } else if let vals = data.values ?? data.data {
                             if let r = vals["I30006"] ?? vals["30006"], let rv = Double(r) { self.currentTemp = rv / 10.0 }
                             if !isInteractionLocked() {
@@ -206,6 +207,12 @@ class StoveViewModel: ObservableObject {
                                     self.targetTemp = tv / 10.0
                                 }
                             }
+                        }
+                    } else {
+                        // Cloud returned empty array for this user -> Trigger local WLAN discovery fallback
+                        if !self.discoveryService.isScanning && !self.socketService.isConnected {
+                            self.lastRawMessage = "Keine Cloud-Daten. Suche Ofen im WLAN..."
+                            self.discoveryService.discoverStove()
                         }
                     }
                 } catch {
@@ -216,6 +223,29 @@ class StoveViewModel: ObservableObject {
     }
     
     private func parseStoveResponse(_ msg: String) {
+        self.lastRawMessage = msg
+        
+        // 1. Try JSON Array format ["SEL","0",["hex1","hex2",...]]
+        if let data = msg.data(using: .utf8),
+           let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [Any],
+           jsonArray.count >= 3,
+           let hexStrings = jsonArray[2] as? [String] {
+            
+            let mockData = CloudStoveData(deviceKey: nil, values: nil, Values: hexStrings, data: nil)
+            if let mapped = mockData.getMappedValues() {
+                self.currentTemp = mapped.room
+                self.exhaustTemp = mapped.exhaust
+                if !isInteractionLocked() {
+                    self.targetTemp = mapped.target
+                }
+                self.waterTemp = mapped.water
+                self.waterPressure = mapped.pressure
+                updateStatusLabel(mapped.status)
+                return
+            }
+        }
+        
+        // 2. Legacy key-value parser fallback
         let components = msg.components(separatedBy: CharacterSet(charactersIn: "[]\", "))
             .filter { $0.count >= 6 }
         
