@@ -22,26 +22,40 @@ public struct CloudStoveData: Codable {
         var pressure: Double = 0
         var status: Int = 0
         
-        // Block 0: Status & Temps
+        // Status from Block 0
         let mainValues = array[0]
-        status = Int(extractHex(from: mainValues, start: 10, length: 2) ?? "0", radix: 16) ?? 0
-        exhaust = Double(Int(extractHex(from: mainValues, start: 12, length: 4) ?? "0", radix: 16) ?? 0) / 10.0
-        room = Double(Int(extractHex(from: mainValues, start: 20, length: 4) ?? "0", radix: 16) ?? 0) / 10.0
+        if mainValues.count >= 12 {
+            status = Int(extractHex(from: mainValues, start: 10, length: 2) ?? "0", radix: 16) ?? 0
+        }
         
-        // Scan blocks for target registers
         for block in array {
-            if block.hasPrefix("0e") {
+            if block.hasPrefix("12ffff") {
+                // Exhaust sensor (30005) - Direct integer °C
+                if let rawHex = extractHex(from: block, start: 6, length: 4), let raw = Int(rawHex, radix: 16) {
+                    exhaust = Double(raw)
+                }
+            } else if block.hasPrefix("12fff7") {
+                // Room temp sensor (30006) - Tenths of °C
+                if let rawHex = extractHex(from: block, start: 6, length: 4), let raw = Int(rawHex, radix: 16) {
+                    room = Double(raw) / 10.0
+                }
+            } else if block.hasPrefix("0e") {
                 let id = extractHex(from: block, start: 2, length: 4) ?? ""
                 let rawVal = Int(extractHex(from: block, start: 6, length: 4) ?? "0", radix: 16) ?? 0
                 
                 switch id {
-                case "01ed": // Room Target (493)
+                case "01ed": // Room Target (20493)
                     target = Double(rawVal) / 10.0
-                case "0180": // Water Target (384)
+                case "0180": // Water Target (20180)
                     water = Double(rawVal) / 10.0
                 default: break
                 }
             }
+        }
+        
+        // Fallback for room if block 12fff7 wasn't present
+        if room == 0 && mainValues.count >= 24 {
+            room = Double(Int(extractHex(from: mainValues, start: 20, length: 4) ?? "0", radix: 16) ?? 0) / 10.0
         }
         
         return (room, exhaust, target, water, pressure, status)
