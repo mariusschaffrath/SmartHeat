@@ -15,10 +15,9 @@ struct StoveCommand: Codable, Equatable {
         }
     }
     
-    // Core Commands (Power)
-    // Home Assistant uses J30253... for ON, J30254... for OFF
-    static let turnOn = StoveCommand(rawString: "J30253000000000001")
-    static let turnOff = StoveCommand(rawString: "J30254000000000001")
+    // Core Commands (Power) - 4Heat Dielle standard J30001
+    static let turnOn = StoveCommand(rawString: "J300010000000001")
+    static let turnOff = StoveCommand(rawString: "J300010000000000")
     static let unlock = StoveCommand(rawString: "J30255000000000001")
     
     // Read Registers (Status & Temps)

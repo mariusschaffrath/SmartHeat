@@ -127,7 +127,7 @@ class CloudService: ObservableObject {
         return nil
     }
     
-    /// Sends a command to the stove via Cloud API (using official Dielle payload format { "id": "...", "comando": ["1", "..."] })
+    /// Sends a command to the stove via Cloud API (using official Dielle payload format { "id": "...", "comando": ["SEC", "1", "..."] })
     func sendCommand(deviceKey: String, token: String, command: StoveCommand) async throws {
         self.activeError = nil
         
@@ -138,13 +138,15 @@ class CloudService: ObservableObject {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 10.0
         
+        let commandArray: [String] = ["SEC", "1", command.rawString]
+        
         // Exact payload format from official Dielle app controllers.js
         let body: [String: Any] = [
             "id": deviceKey,
-            "comando": ["1", command.rawString]
+            "comando": commandArray
         ]
         
-        print("CLOUD SENDING to ID \(deviceKey): \(command.rawString)")
+        print("CLOUD SENDING to ID \(deviceKey): \(commandArray)")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
         do {
