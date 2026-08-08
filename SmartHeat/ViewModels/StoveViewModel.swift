@@ -225,6 +225,15 @@ class StoveViewModel: ObservableObject {
     private func parseStoveResponse(_ msg: String) {
         self.lastRawMessage = msg
         
+        if msg.contains("ERR") || msg.contains("\"ERR\"") {
+            if msg.contains("\"5\"") || msg.contains("1\",\"5") {
+                self.lastRawMessage = "⚠️ WLAN-Modul belegt (ERR 1 5). Bitte offizielle 4Heat App auf dem Smartphone vollständig schließen."
+            } else {
+                self.lastRawMessage = "⚠️ Ofen-Antwort: \(msg)"
+            }
+            return
+        }
+        
         // 1. Try JSON Array format ["SEL","0",["hex1","hex2",...]]
         if let data = msg.data(using: .utf8),
            let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [Any],
