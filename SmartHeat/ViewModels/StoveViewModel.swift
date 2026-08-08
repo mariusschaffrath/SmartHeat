@@ -75,7 +75,7 @@ class StoveViewModel: ObservableObject {
                 if !self.socketService.isConnected {
                     self.socketService.connect(host: "127.0.0.1", port: 8080)
                 }
-            } else if !self.socketService.isConnected && !self.manualIP.isEmpty {
+            } else if !self.socketService.isConnected && !self.manualIP.isEmpty && self.manualIP != "192.168.178.1" {
                 self.socketService.connect(host: self.manualIP)
             }
         }

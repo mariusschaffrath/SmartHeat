@@ -45,7 +45,7 @@ class UDPDiscoveryService: ObservableObject {
         // Wir scannen gezielt nur die wahrscheinlichsten Ports
         let targetPorts: [UInt16] = [80, 81]
         
-        for i in 1...50 {
+        for i in 2...254 {
             let targetIP = "\(baseIP).\(i)"
             if targetIP == localIP { continue }
             
@@ -57,12 +57,20 @@ class UDPDiscoveryService: ObservableObject {
                 connection.stateUpdateHandler = { [weak self] state in
                     guard let self else { return }
                     if state == .ready {
-                        Task { @MainActor in
-                            if self.isScanning {
-                                self.addLog("Ofen lokal gefunden: \(targetIP)")
-                                self.discoveredIP = targetIP
-                                self.isScanning = false
-                                self.stopDiscovery()
+                        // Validate if this open port 80 is actually a 4Heat stove by sending ["SEL","0"]\n
+                        connection.send(content: "[\"SEL\",\"0\"]\n".data(using: .utf8), completion: .contentProcessed({ _ in }))
+                        connection.receive(minimumIncompleteLength: 1, maximumLength: 1024) { data, _, _, _ in
+                            if let data = data, let resp = String(data: data, encoding: .utf8), resp.contains("SEL") || resp.contains("[") {
+                                Task { @MainActor in
+                                    if self.isScanning {
+                                        self.addLog("Ofen lokal verifiziert: \(targetIP)")
+                                        self.discoveredIP = targetIP
+                                        self.isScanning = false
+                                        self.stopDiscovery()
+                                    }
+                                }
+                            } else {
+                                connection.cancel()
                             }
                         }
                     } else if case .failed = state {
