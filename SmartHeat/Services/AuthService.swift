@@ -2,13 +2,15 @@ import Foundation
 import Combine
 
 public struct StoveDevice: Codable, Identifiable, Equatable {
-    public let id: String        // The 36-character DeviceKey GUID
+    public let id: String        // The DeviceKey GUID or DeviceId
     public let name: String
     public let serialNumber: String?
     public let values: [String]?
     
     enum CodingKeys: String, CodingKey {
-        case id = "DeviceKey"
+        case deviceKey = "DeviceKey"
+        case deviceId = "DeviceId"
+        case id = "id"
         case name = "Name"
         case serialNumber = "SerialNumber"
         case values = "Values"
@@ -23,9 +25,14 @@ public struct StoveDevice: Codable, Identifiable, Equatable {
     
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = (try? container.decode(String.self, forKey: .id)) ?? ""
+        let foundId = (try? container.decode(String.self, forKey: .deviceId))
+            ?? (try? container.decode(String.self, forKey: .deviceKey))
+            ?? (try? container.decode(String.self, forKey: .id))
+            ?? ""
+        self.id = foundId
         self.name = (try? container.decode(String.self, forKey: .name)) ?? "Dielle Ofen"
-        self.serialNumber = try? container.decode(String.self, forKey: .serialNumber)
+        self.serialNumber = (try? container.decode(String.self, forKey: .serialNumber))
+            ?? (foundId.count <= 10 && !foundId.isEmpty ? foundId : nil)
         self.values = try? container.decodeIfPresent([String].self, forKey: .values)
     }
 }
@@ -98,27 +105,49 @@ class AuthService: ObservableObject {
     func fetchDevices() async throws {
         guard isAuthenticated, let token = token else { return }
         
-        let urlString = "\(baseURL)/api/devices/Summary"
-        guard let url = URL(string: urlString) else { return }
+        let endpoints = ["/api/devices", "/api/Devices", "/api/devices/Summary"]
         
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = 8.0
-        
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        for ep in endpoints {
+            guard let url = URL(string: "\(baseURL)\(ep)") else { continue }
             
-            if statusCode == 200 {
-                if let decoded = try? JSONDecoder().decode([StoveDevice].self, from: data), !decoded.isEmpty {
-                    self.devices = decoded
-                    return
+            var request = URLRequest(url: url)
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.timeoutInterval = 8.0
+            
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                
+                if statusCode == 200 {
+                    if let decoded = try? JSONDecoder().decode([StoveDevice].self, from: data), !decoded.isEmpty {
+                        self.devices = decoded
+                        print("DEBUG: \(decoded.count) Geräte von \(ep) geladen.")
+                        return
+                    }
+                    
+                    // Flexible fallback JSON parsing
+                    if let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]], !jsonArray.isEmpty {
+                        let parsed = jsonArray.compactMap { item -> StoveDevice? in
+                            let id = item["DeviceId"] as? String ?? item["DeviceKey"] as? String ?? item["id"] as? String ?? ""
+                            guard !id.isEmpty else { return nil }
+                            let name = item["Name"] as? String ?? item["nome"] as? String ?? "Dielle Ofen"
+                            let sn = item["SerialNumber"] as? String ?? item["serial"] as? String ?? (id.count <= 10 ? id : nil)
+                            return StoveDevice(id: id, name: name, serialNumber: sn)
+                        }
+                        if !parsed.isEmpty {
+                            self.devices = parsed
+                            print("DEBUG: \(parsed.count) Geräte via JSON geglättet.")
+                            return
+                        }
+                    }
                 }
+            } catch {
+                print("DEBUG: Fetch devices error on \(ep): \(error.localizedDescription)")
             }
-        } catch { }
+        }
         
-        self.devices = [StoveDevice(id: "25016460", name: "Dielle Ofen (Default)", serialNumber: "25016460")]
+        self.devices = [StoveDevice(id: "25016460", name: "Dielle Ofen", serialNumber: "25016460")]
         self.activeError = nil
     }
     

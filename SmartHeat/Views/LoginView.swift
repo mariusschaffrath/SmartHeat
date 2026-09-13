@@ -183,6 +183,8 @@ struct LoginView: View {
         Task {
             do {
                 try await authService.login(email: cleanEmail, password: cleanPassword)
+                KeychainService.shared.save(cleanEmail, key: "cloud_email")
+                KeychainService.shared.save(cleanPassword, key: "cloud_password")
                 isLoading = false
             } catch {
                 errorMessage = "Login fehlgeschlagen: \(error.localizedDescription)"

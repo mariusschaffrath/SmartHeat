@@ -172,9 +172,18 @@ class StoveViewModel: ObservableObject {
     }
     
     private func updateCloudGuidFromDevices() {
-        if let first = authService.devices.first, !first.id.isEmpty {
-            if self.cloudGuid != first.id {
+        if let first = authService.devices.first {
+            // Bevorzuge numerische Ofen-ID (z. B. "25016460")
+            let numericId = first.serialNumber ?? (first.id.count <= 10 && !first.id.isEmpty ? first.id : "25016460")
+            if !numericId.isEmpty && self.deviceId != numericId {
+                self.deviceId = numericId
+                UserDefaults.standard.set(numericId, forKey: "saved_device_id")
+                print("CONFIG: Ofen-ID \(numericId) automatisch aus Cloud bezogen und gespeichert.")
+            }
+            
+            if !first.id.isEmpty && self.cloudGuid != first.id {
                 self.cloudGuid = first.id
+                UserDefaults.standard.set(first.id, forKey: "saved_cloud_guid")
                 print("CONFIG: GUID \(first.id) aus Cloud-Geräten übernommen.")
             }
         }
