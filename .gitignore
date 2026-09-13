@@ -30,3 +30,7 @@ Thumbs.db
 # Swift Package Manager
 .build/
 .swiftpm/
+
+# Local scratch / reverse engineering files
+scratch/
+*.apk
