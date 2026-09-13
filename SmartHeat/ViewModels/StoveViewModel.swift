@@ -188,7 +188,7 @@ class StoveViewModel: ObservableObject {
     
     func refreshData() {
         if useWLANConnection && socketService.isConnected {
-            socketService.sendCommand(.selAll)
+            socketService.sendCommand(.poll2Ways)
         } else if authService.isAuthenticated, let token = authService.token {
             let keyToUse = deviceId.isEmpty ? "25016460" : deviceId
             
@@ -247,17 +247,17 @@ class StoveViewModel: ObservableObject {
             return
         }
         
-        // 1. Try JSON Array format ["SEL","0",["hex1","hex2",...]]
+        // 1. Try JSON Array format ["2WL","0",["hex1","hex2",...]] or ["SEL","0",[...]]
         if let data = msg.data(using: .utf8),
            let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [Any],
            jsonArray.count >= 3,
            let hexStrings = jsonArray[2] as? [String] {
             
-            let mockData = CloudStoveData(deviceKey: nil, values: nil, Values: hexStrings, data: nil)
+            let mockData = CloudStoveData(deviceKey: nil, isOnline: nil, values: nil, Values: hexStrings, data: nil)
             if let mapped = mockData.getMappedValues() {
                 self.currentTemp = mapped.room
                 self.exhaustTemp = mapped.exhaust
-                if !isInteractionLocked() {
+                if !isInteractionLocked() && mapped.target > 0 {
                     self.targetTemp = mapped.target
                 }
                 self.waterTemp = mapped.water

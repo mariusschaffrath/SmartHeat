@@ -3,15 +3,55 @@ import Combine
 
 public struct CloudStoveData: Codable {
     public let deviceKey: String?
+    public let isOnline: Bool?
     public let values: [String: String]? // Fallback
-    public let Values: [String]?        // Main 4Heat Hex array format
+    public let Values: [String]?        // Main 4Heat/Dielle Hex array format
     public let data: [String: String]?
     
     enum CodingKeys: String, CodingKey {
         case deviceKey = "DeviceKey"
+        case isOnline = "IsOnline"
         case values, Values, data
+        case lastMessage = "LastMessageReceived"
     }
     
+    public init(deviceKey: String?, isOnline: Bool? = nil, values: [String: String]?, Values: [String]?, data: [String: String]?) {
+        self.deviceKey = deviceKey
+        self.isOnline = isOnline
+        self.values = values
+        self.Values = Values
+        self.data = data
+    }
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.deviceKey = try? container.decode(String.self, forKey: .deviceKey)
+        self.isOnline = try? container.decode(Bool.self, forKey: .isOnline)
+        self.values = try? container.decode([String: String].self, forKey: .values)
+        self.data = try? container.decode([String: String].self, forKey: .data)
+        
+        if let directValues = try? container.decode([String].self, forKey: .Values) {
+            self.Values = directValues
+        } else if let lmrString = try? container.decode(String.self, forKey: .lastMessage),
+                  let lmrData = lmrString.data(using: .utf8),
+                  let lmrJson = try? JSONSerialization.jsonObject(with: lmrData) as? [String: Any],
+                  let valArray = lmrJson["Values"] as? [String] {
+            self.Values = valArray
+        } else {
+            self.Values = nil
+        }
+    }
+    
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try? container.encode(deviceKey, forKey: .deviceKey)
+        try? container.encode(isOnline, forKey: .isOnline)
+        try? container.encode(values, forKey: .values)
+        try? container.encode(Values, forKey: .Values)
+        try? container.encode(data, forKey: .data)
+    }
+    
+    /// Parses 2ways / syevo hex array matching official Dielle SERVIZI2W logic
     public func getMappedValues() -> (room: Double, exhaust: Double, target: Double, water: Double, pressure: Double, status: Int)? {
         guard let array = Values, !array.isEmpty else { return nil }
         
@@ -22,43 +62,116 @@ public struct CloudStoveData: Codable {
         var pressure: Double = 0
         var status: Int = 0
         
-        // Status from Block 0
-        let mainValues = array[0]
-        if mainValues.count >= 12 {
-            status = Int(extractHex(from: mainValues, start: 10, length: 2) ?? "0", radix: 16) ?? 0
-        }
-        
-        for block in array {
-            if block.hasPrefix("12ffff") {
-                // Exhaust sensor (30005) - Direct integer °C
-                if let rawHex = extractHex(from: block, start: 6, length: 4), let raw = Int(rawHex, radix: 16) {
-                    exhaust = Double(raw)
+        for (index, block) in array.enumerated() {
+            // 1. Block 0 or prefix "10" (0x10 = 519_MAINVALUES)
+            if block.hasPrefix("10") || index == 0 {
+                // Status at offset 10..12
+                if let stHex = extractHex(from: block, start: 10, length: 2), let st = Int(stHex, radix: 16) {
+                    status = st
                 }
-            } else if block.hasPrefix("12fff7") {
-                // Room temp sensor (30006) - Tenths of °C
-                if let rawHex = extractHex(from: block, start: 6, length: 4), let raw = Int(rawHex, radix: 16) {
-                    room = Double(raw) / 10.0
-                }
-            } else if block.hasPrefix("0e") {
-                let id = extractHex(from: block, start: 2, length: 4) ?? ""
-                let rawVal = Int(extractHex(from: block, start: 6, length: 4) ?? "0", radix: 16) ?? 0
                 
-                switch id {
-                case "01ed": // Room Target (20493)
-                    target = Double(rawVal) / 10.0
-                case "0180": // Water Target (20180)
-                    water = Double(rawVal) / 10.0
-                default: break
+                // Multiplier (pos_punto) from offset 36..38 (default: 0.1)
+                var multTemp: Double = 0.1
+                if block.count >= 38, let ppHex = extractHex(from: block, start: 36, length: 2), let pp = Int(ppHex, radix: 16) {
+                    switch pp {
+                    case 0: multTemp = 1.0
+                    case 1: multTemp = 0.1
+                    case 2: multTemp = 0.01
+                    case 3: multTemp = 0.001
+                    default: multTemp = 0.1
+                    }
+                }
+                
+                // Room / Main Temp at offset 20..24 (signed Int16)
+                if let tpRaw = extractSignedInt16(from: block, start: 20) {
+                    if tpRaw != -127 && tpRaw > 0 {
+                        room = Double(tpRaw) * multTemp
+                    }
+                }
+                
+                // Secondary Temp (exhaust/return) at offset 6..10
+                if let tsRaw = extractSignedInt16(from: block, start: 6) {
+                    if tsRaw > 0 && exhaust == 0 {
+                        exhaust = Double(tsRaw) * multTemp
+                    }
+                }
+            }
+            
+            // 2. Info Block with prefix "0c81" (state_info_81)
+            if block.hasPrefix("0c81") {
+                var multTerm: Double = 0.1
+                if block.count >= 30, let ppHex = extractHex(from: block, start: 28, length: 2), let pp = Int(ppHex, radix: 16) {
+                    switch pp {
+                    case 0: multTerm = 1.0
+                    case 1: multTerm = 0.1
+                    case 2: multTerm = 0.01
+                    case 3: multTerm = 0.001
+                    default: multTerm = 0.1
+                    }
+                }
+                // Target thermostat at offset 24..28
+                if let ttHex = extractHex(from: block, start: 24, length: 4), let rawTt = Int(ttHex, radix: 16), rawTt > 0 {
+                    target = Double(rawTt) * multTerm
+                }
+            }
+            
+            // 3. Testout sensor blocks (prefix "12")
+            if block.hasPrefix("12") {
+                let sensorId = extractHex(from: block, start: 2, length: 4)?.lowercased() ?? ""
+                var mult: Double = 1.0
+                if block.count >= 22, let ppHex = extractHex(from: block, start: 20, length: 2), let pp = Int(ppHex, radix: 16) {
+                    switch pp {
+                    case 0: mult = 1.0
+                    case 1: mult = 0.1
+                    case 2: mult = 0.01
+                    case 3: mult = 0.001
+                    default: mult = 1.0
+                    }
+                }
+                
+                if let rawVal = extractSignedInt16(from: block, start: 6) {
+                    if sensorId == "ffff" { // Exhaust temp sensor (30005)
+                        exhaust = Double(rawVal) * mult
+                    } else if sensorId == "fff7" && room == 0 { // Room temp sensor (30006)
+                        room = Double(rawVal) * mult
+                    }
+                }
+            }
+            
+            // 4. Parameter blocks (prefix "0e")
+            if block.hasPrefix("0e") {
+                let id = extractHex(from: block, start: 2, length: 4)?.lowercased() ?? ""
+                var mult: Double = 0.1
+                if block.count >= 22, let ppHex = extractHex(from: block, start: 20, length: 2), let pp = Int(ppHex, radix: 16) {
+                    switch pp {
+                    case 0: mult = 1.0
+                    case 1: mult = 0.1
+                    case 2: mult = 0.01
+                    default: mult = 0.1
+                    }
+                }
+                
+                if let rawVal = extractSignedInt16(from: block, start: 6) {
+                    switch id {
+                    case "01ed": // Room Target (20493)
+                        if target == 0 {
+                            target = Double(rawVal) * mult
+                        }
+                    case "0180": // Water Target (20180)
+                        water = Double(rawVal) * mult
+                    default: break
+                    }
                 }
             }
         }
         
-        // Fallback for room if block 12fff7 wasn't present
-        if room == 0 && mainValues.count >= 24 {
-            room = Double(Int(extractHex(from: mainValues, start: 20, length: 4) ?? "0", radix: 16) ?? 0) / 10.0
-        }
-        
         return (room, exhaust, target, water, pressure, status)
+    }
+    
+    private func extractSignedInt16(from hex: String, start: Int) -> Int? {
+        guard let hexPart = extractHex(from: hex, start: start, length: 4),
+              let unsigned = UInt16(hexPart, radix: 16) else { return nil }
+        return Int(Int16(bitPattern: unsigned))
     }
     
     private func extractHex(from hex: String, start: Int, length: Int) -> String? {
@@ -80,14 +193,21 @@ class CloudService: ObservableObject {
         self.baseURL = url
     }
     
-    /// Fetches live stove telemetry from Cloud using official Dielle REST endpoints (/RealTime?id= and /Summary?ids=)
+    /// Convenience helper for decoding an array of hex values directly (e.g. from unit tests)
+    public func parseAllValues(_ values: [String]) -> (room: Double, exhaust: Double, target: Double, status: Int)? {
+        let data = CloudStoveData(deviceKey: nil, isOnline: nil, values: nil, Values: values, data: nil)
+        guard let mapped = data.getMappedValues() else { return nil }
+        return (mapped.room, mapped.exhaust, mapped.target, mapped.status)
+    }
+    
+    /// Fetches live stove telemetry from Cloud using official Dielle REST endpoints (/Summary?ids= and /RealTime?id=)
     func fetchStoveUpdate(deviceKey: String, token: String) async throws -> CloudStoveData? {
         self.activeError = nil
         
         // Exact endpoints reverse-engineered from official Dielle app (com.ionicframework.dielle389999)
         let endpoints = [
-            "/RealTime?id=\(deviceKey)",
             "/Summary?ids=\(deviceKey)",
+            "/RealTime?id=\(deviceKey)",
             "/Summary?id=\(deviceKey)"
         ]
         
@@ -96,6 +216,7 @@ class CloudService: ObservableObject {
             
             var request = URLRequest(url: url)
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             request.timeoutInterval = 8.0
             
@@ -107,10 +228,34 @@ class CloudService: ObservableObject {
                     if let jsonString = String(data: data, encoding: .utf8), jsonString != "[]" && !jsonString.isEmpty {
                         self.lastCloudResponse = jsonString
                         
-                        if let decoded = try? JSONDecoder().decode(CloudStoveData.self, from: data) {
+                        // 1. Direct CloudStoveData decoding
+                        if let decoded = try? JSONDecoder().decode(CloudStoveData.self, from: data), decoded.Values != nil {
                             return decoded
-                        } else if let decodedArray = try? JSONDecoder().decode([CloudStoveData].self, from: data), let first = decodedArray.first {
+                        }
+                        
+                        // 2. Array of CloudStoveData
+                        if let decodedArray = try? JSONDecoder().decode([CloudStoveData].self, from: data),
+                           let first = decodedArray.first, first.Values != nil {
                             return first
+                        }
+                        
+                        // 3. Manual JSON extraction for LastMessageReceived
+                        if let json = try? JSONSerialization.jsonObject(with: data) {
+                            if let arr = json as? [[String: Any]], let first = arr.first {
+                                if let lmr = first["LastMessageReceived"] as? String,
+                                   let lmrData = lmr.data(using: .utf8),
+                                   let lmrJson = try? JSONSerialization.jsonObject(with: lmrData) as? [String: Any],
+                                   let valArr = lmrJson["Values"] as? [String] {
+                                    return CloudStoveData(deviceKey: deviceKey, isOnline: first["IsOnline"] as? Bool, values: nil, Values: valArr, data: nil)
+                                }
+                                if let valArr = first["Values"] as? [String] {
+                                    return CloudStoveData(deviceKey: deviceKey, isOnline: first["IsOnline"] as? Bool, values: nil, Values: valArr, data: nil)
+                                }
+                            } else if let dict = json as? [String: Any] {
+                                if let valArr = dict["Values"] as? [String] {
+                                    return CloudStoveData(deviceKey: deviceKey, isOnline: dict["IsOnline"] as? Bool, values: nil, Values: valArr, data: nil)
+                                }
+                            }
                         }
                     }
                 } else if statusCode == 401 {

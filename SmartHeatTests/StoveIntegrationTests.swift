@@ -37,10 +37,21 @@ final class StoveIntegrationTests: XCTestCase {
         if let (room, exhaust, target, status) = result {
             print("SIMULATION ERGEBNIS -> Raum: \(room)°, Abgas: \(exhaust)°, Ziel: \(target)°, Status: \(status)")
             
-            // Verifizierung basierend auf dem neuen Deep-Parsing
-            XCTAssertEqual(room, 21.6, "Raumtemperatur sollte 21.6 sein (Index 0, Offset 20)")
-            XCTAssertEqual(exhaust, 0.7, "Abgastemperatur sollte 0.7 sein (Index 0, Offset 6 - Ofen ist wohl gerade aus)")
-            XCTAssertEqual(status, 11, "Status sollte 11 (0x0B) sein basierend auf Index 0 Offset 10")
+            // Verifizierung basierend auf der offiziellen Dielle SERVIZI2W Dekodierung
+            XCTAssertEqual(room, 21.6, accuracy: 0.01, "Raumtemperatur sollte 21.6 sein (Index 0 Offset 20)")
+            XCTAssertEqual(exhaust, 34.0, accuracy: 0.01, "Abgastemperatur sollte 34.0 sein (Index 2, 12ffff0022)")
+            XCTAssertEqual(target, 18.9, accuracy: 0.01, "Solltemperatur sollte 18.9 sein (Index 1, 0c81 termostato 00bd)")
+            XCTAssertEqual(status, 11, "Status sollte 11 (0x0B = Standby) sein basierend auf Index 0 Offset 10")
         }
+    }
+    
+    func testCommandFormatting() {
+        XCTAssertEqual(StoveCommand.turnOn.rawString, "05040000")
+        XCTAssertEqual(StoveCommand.turnOff.rawString, "05050000")
+        XCTAssertEqual(StoveCommand.poll2Ways.rawString, "2WL0")
+        
+        // Target temp 18.5°C = 185 = 0x00b9
+        let tempCmd = StoveCommand.writeParameter(id: "01ed", value: 185)
+        XCTAssertEqual(tempCmd.rawString, "050e01ed00b9")
     }
 }

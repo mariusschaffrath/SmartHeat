@@ -55,11 +55,18 @@ class StoveSocketService: ObservableObject {
         let raw = command.rawString
         var payload: String
         
-        if raw == "SEL0" {
+        if raw == "2WL0" || raw == "2WL" {
+            payload = "[\"2WL\",\"0\"]"
+        } else if raw == "SEL0" || raw == "SEL" {
             payload = "[\"SEL\",\"0\"]"
-        } else if raw.hasPrefix("B") || raw.hasPrefix("J") {
-            // Write & Switch commands require SEC layer
-            payload = "[\"SEC\",\"1\",\"\(raw)\"]"
+        } else if raw.hasPrefix("05") || raw.hasPrefix("2WC") {
+            // 2ways Write Command (turnOn, turnOff, unlock, writeParameter): ["2WC","1","<hex>"]
+            let clean = raw.replacingOccurrences(of: "2WC", with: "")
+            payload = "[\"2WC\",\"1\",\"\(clean.isEmpty ? raw : clean)\"]"
+        } else if raw.hasPrefix("B") || raw.hasPrefix("J") || raw.hasPrefix("SEC") {
+            // Syevo Write & Switch commands require SEC layer: ["SEC","1","<raw>"]
+            let clean = raw.replacingOccurrences(of: "SEC", with: "")
+            payload = "[\"SEC\",\"1\",\"\(clean.isEmpty ? raw : clean)\"]"
         } else {
             payload = "[\"\(raw)\"]"
         }

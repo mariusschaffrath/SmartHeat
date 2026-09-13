@@ -34,3 +34,5 @@ Thumbs.db
 # Local scratch / reverse engineering files
 scratch/
 *.apk
+*.pyc
+__pycache__/

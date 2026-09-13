@@ -35,23 +35,46 @@ class StoveState:
 
     def generate_hex_array(self):
         with self.lock:
-            # 1. Hauptwerte (Block 0)
+            # 1. Block 0: Main values (prefix 10)
             status_hex = f"{self.status:02x}"
             exhaust_hex = f"{int(self.exhaust_temp * 10):04x}"
             room_hex = f"{int(self.room_temp * 10):04x}"
             
-            # Format: 0000000000 + Status(2) + Exhaust(4) + 0000 + Room(4) + ...
-            main_block = f"0000000000{status_hex}{exhaust_hex}0000{room_hex}000000000000000000000000"
+            # Format from real stove: 10 00 01 0000 [status:2] 00 07 1354 [room:4] 04 000000 0188 01
+            main_block = f"1000010000{status_hex}00071354{room_hex}04000000018801"
             
-            # 2. Parameter Blöcke (0e01ed -> Target Room Temp, 0e0180 -> Water Target)
+            # 2. Block 1: Info (prefix 0c81)
             target_hex = f"{int(self.target_temp * 10):04x}"
-            target_block = f"0e01ed{target_hex}"
+            info_block = f"0c81013000010b0605010000{target_hex}01"
             
+            # 3. Exhaust sensor (prefix 12ffff)
+            exhaust_val_hex = f"{int(self.exhaust_temp):04x}"
+            exhaust_block = f"12ffff{exhaust_val_hex}000000000100000000000000"
+            
+            # 4. Room sensor (prefix 12fff7)
+            room_sensor_block = f"12fff7{room_hex}000000000101000000000000"
+            
+            # Additional parameter blocks
             water_hex = f"{int(self.water_temp * 10):04x}"
-            water_block = f"0e0180{water_hex}"
+            water_block = f"0e0180{water_hex}000102580000000101800000"
+            target_par_block = f"0e01ed{target_hex}000000000000000101ed0000"
             
-            # Array aus 14 Blöcken simulieren
-            hex_array = [main_block] + ["00000000000000"] * 12 + [target_block, water_block]
+            hex_array = [
+                main_block,
+                info_block,
+                exhaust_block,
+                room_sensor_block,
+                "12ffe20000000000000100000000000000",
+                "12fffa0000000000000100000000000000",
+                "0e016c00060001000600000001016c0007",
+                "0e023f00000000000600000001023f0007",
+                "12fffb0000000000000100000000000000",
+                "0e016b00060001000600000001016b0007",
+                "12fff60000000000000100000000000000",
+                "12fffc0000000000000100000000000000",
+                water_block,
+                target_par_block
+            ]
             return hex_array
 
 stove = StoveState()
@@ -119,39 +142,46 @@ class StoveSocketServer(threading.Thread):
             data = json.loads(packet)
             cmd = data[0] if isinstance(data, list) and len(data) > 0 else ""
             
-            if cmd == "SEL":
+            if cmd in ("SEL", "2WL"):
                 hex_array = stove.generate_hex_array()
-                # Format: ["SEL","0",["block1","block2",...]]
-                resp = ["SEL", "0", hex_array]
+                resp = [cmd, "0", hex_array]
                 return json.dumps(resp) + "\n"
                 
-            elif cmd == "SEC":
-                raw_code = data[2] if len(data) > 2 else ""
-                print(f"  [EXEC COMMAND] SEC Code: {raw_code}")
+            elif cmd in ("SEC", "2WC"):
+                raw_code = data[2] if len(data) > 2 else (data[1] if len(data) > 1 else "")
+                print(f"  [EXEC COMMAND] {cmd} Code: {raw_code}")
                 
-                # Einschalten J30253
-                if "J30253" in raw_code:
+                # 2ways 05040000 or Syevo J30253 -> Turn ON
+                if "05040000" in raw_code or "J30253" in raw_code:
                     stove.status = 2 # Zündung
                     print("  🔥 Ofen-Status geändert: ZÜNDUNG")
                     threading.Thread(target=self.simulate_ignition_sequence, daemon=True).start()
-                    return json.dumps(["SEC", "1", ["J30253000000000001", "1"]]) + "\n"
+                    return json.dumps([cmd, "1", [raw_code, "1"]]) + "\n"
                 
-                # Ausschalten J30254
-                elif "J30254" in raw_code:
+                # 2ways 05050000 or Syevo J30254 -> Turn OFF
+                elif "05050000" in raw_code or "J30254" in raw_code:
                     stove.status = 7 # Reinigung / Ausschalten
                     print("  ❄️ Ofen-Status geändert: REINIGUNG / AUSSCHALTEN")
                     threading.Thread(target=self.simulate_cooldown_sequence, daemon=True).start()
-                    return json.dumps(["SEC", "1", ["J30254000000000001", "1"]]) + "\n"
+                    return json.dumps([cmd, "1", [raw_code, "1"]]) + "\n"
                 
-                # Sollwert ändern B20493000000000220
+                # 2ways 050e01ed00b9 -> Set Target Temp
+                elif "050e" in raw_code and "01ed" in raw_code:
+                    hex_val = raw_code[-4:]
+                    val_num = int(hex_val, 16) / 10.0
+                    stove.target_temp = val_num
+                    print(f"  🌡️ Ziel-Temperatur geändert auf {val_num}°C")
+                    return json.dumps([cmd, "1", [raw_code, "1"]]) + "\n"
+                
+                # Syevo B20493...
                 elif raw_code.startswith("B20493"):
                     val_raw = raw_code[7:]
                     val_num = int(val_raw) / 10.0
                     stove.target_temp = val_num
                     print(f"  🌡️ Ziel-Temperatur geändert auf {val_num}°C")
-                    return json.dumps(["SEC", "1", [raw_code, "1"]]) + "\n"
+                    return json.dumps([cmd, "1", [raw_code, "1"]]) + "\n"
                 
-                return json.dumps(["SEC", "1", [raw_code, "1"]]) + "\n"
+                return json.dumps([cmd, "1", [raw_code, "1"]]) + "\n"
                 
             elif cmd.startswith("I") or cmd.startswith("A"):
                 return json.dumps([cmd, "0"]) + "\n"
@@ -211,21 +241,27 @@ class CloudRESTHandler(BaseHTTPRequestHandler):
         elif path.endswith("/command") or path.endswith("/Command"):
             try:
                 body_json = json.loads(body_bytes.decode('utf-8'))
-                device_id = body_json.get("DeviceId") or body_json.get("DeviceKey")
-                comando = body_json.get("Comando") or body_json.get("Command")
+                device_id = body_json.get("id") or body_json.get("DeviceId") or body_json.get("DeviceKey")
+                comando = body_json.get("comando") or body_json.get("Comando") or body_json.get("Command")
                 
                 print(f"  [CLOUD CMD] Gerät: {device_id}, Befehl: {comando}")
                 
-                if isinstance(comando, list) and len(comando) > 1:
-                    raw_cmd = comando[1]
-                    if "J30253" in raw_cmd:
+                if isinstance(comando, list) and len(comando) > 0:
+                    raw_cmd = comando[-1] if len(comando) >= 3 else (comando[1] if len(comando) > 1 else comando[0])
+                    
+                    if "05040000" in raw_cmd or "J30253" in raw_cmd:
                         stove.status = 5
                         stove.exhaust_temp = 145.0
                         print("  🔥 Cloud-Befehl: EINSCHALTEN -> BETRIEB")
-                    elif "J30254" in raw_cmd:
+                    elif "05050000" in raw_cmd or "J30254" in raw_cmd:
                         stove.status = 0
                         stove.exhaust_temp = 25.0
                         print("  ❄️ Cloud-Befehl: AUSSCHALTEN -> AUS")
+                    elif "050e" in raw_cmd and "01ed" in raw_cmd:
+                        hex_val = raw_cmd[-4:]
+                        val_num = int(hex_val, 16) / 10.0
+                        stove.target_temp = val_num
+                        print(f"  🌡️ Cloud-Befehl: ZIELTEMP -> {val_num}°C")
                     elif raw_cmd.startswith("B20493"):
                         val_num = int(raw_cmd[7:]) / 10.0
                         stove.target_temp = val_num
@@ -259,12 +295,15 @@ class CloudRESTHandler(BaseHTTPRequestHandler):
             return
 
         # 2. Device Summary / Telemetry Endpoint
-        elif path.endswith("/Summary") or path.endswith("/summary"):
+        elif path.endswith("/Summary") or path.endswith("/summary") or path.endswith("/RealTime") or path.endswith("/realtime"):
             hex_array = stove.generate_hex_array()
             response = [
                 {
+                    "DeviceId": stove.serial_number,
                     "DeviceKey": stove.device_key,
-                    "Values": hex_array
+                    "IsOnline": True,
+                    "Values": hex_array,
+                    "LastMessageReceived": json.dumps({"Values": hex_array})
                 }
             ]
             self._send_json(response, 200)
