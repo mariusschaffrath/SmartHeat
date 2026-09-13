@@ -71,7 +71,7 @@ class StoveViewModel: ObservableObject {
         return Date().timeIntervalSince(lastUserInteraction) < interactionLockDuration
     }
     
-    @Published var manualIP: String = UserDefaults.standard.string(forKey: "manual_ip") ?? "" {
+    @Published var manualIP: String = UserDefaults.standard.string(forKey: "manual_ip") ?? "192.168.178.188" {
         didSet { UserDefaults.standard.set(manualIP, forKey: "manual_ip") }
     }
     
@@ -247,23 +247,31 @@ class StoveViewModel: ObservableObject {
             return
         }
         
-        // 1. Try JSON Array format ["2WL","0",["hex1","hex2",...]] or ["SEL","0",[...]]
+        // 1. Try JSON Array format ["2WL","0",["hex1","hex2",...]] or flat ["2WL","25","hex1","hex2",...]
         if let data = msg.data(using: .utf8),
            let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [Any],
-           jsonArray.count >= 3,
-           let hexStrings = jsonArray[2] as? [String] {
+           jsonArray.count >= 3 {
             
-            let mockData = CloudStoveData(deviceKey: nil, isOnline: nil, values: nil, Values: hexStrings, data: nil)
-            if let mapped = mockData.getMappedValues() {
-                self.currentTemp = mapped.room
-                self.exhaustTemp = mapped.exhaust
-                if !isInteractionLocked() && mapped.target > 0 {
-                    self.targetTemp = mapped.target
+            let hexStrings: [String]
+            if let nested = jsonArray[2] as? [String] {
+                hexStrings = nested
+            } else {
+                hexStrings = jsonArray.dropFirst(2).compactMap { $0 as? String }.filter { $0.count >= 10 }
+            }
+            
+            if !hexStrings.isEmpty {
+                let mockData = CloudStoveData(deviceKey: nil, isOnline: nil, values: nil, Values: hexStrings, data: nil)
+                if let mapped = mockData.getMappedValues() {
+                    self.currentTemp = mapped.room
+                    self.exhaustTemp = mapped.exhaust
+                    if !isInteractionLocked() && mapped.target > 0 {
+                        self.targetTemp = mapped.target
+                    }
+                    self.waterTemp = mapped.water
+                    self.waterPressure = mapped.pressure
+                    updateStatusLabel(mapped.status)
+                    return
                 }
-                self.waterTemp = mapped.water
-                self.waterPressure = mapped.pressure
-                updateStatusLabel(mapped.status)
-                return
             }
         }
         
@@ -333,7 +341,7 @@ class StoveViewModel: ObservableObject {
         guard !isTargetLocked else { return }
         triggerInteractionLock()
         targetTemp = value
-        sendUniversal(command: StoveCommand.writeParameter(id: "20493", value: Int(value * 10))) 
+        sendUniversal(command: StoveCommand.writeParameter(value: Int(value * 10))) 
     }
     
     private func sendUniversal(command: StoveCommand) {
