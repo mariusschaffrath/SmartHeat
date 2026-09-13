@@ -33,6 +33,11 @@ class StoveViewModel: ObservableObject {
         didSet { UserDefaults.standard.set(isWaterStove, forKey: "is_water_stove") }
     }
     
+    // Feature Flag: Pellet Tank tracking (Default: false -> disabled until ready for rollout)
+    @Published var isPelletTankEnabled: Bool = UserDefaults.standard.bool(forKey: "enable_pellet_tank_feature") {
+        didSet { UserDefaults.standard.set(isPelletTankEnabled, forKey: "enable_pellet_tank_feature") }
+    }
+    
     // Numeric Serial Number (for info)
     @Published var deviceId: String = UserDefaults.standard.string(forKey: "saved_device_id") ?? "25016460" {
         didSet { UserDefaults.standard.set(deviceId, forKey: "saved_device_id") }
@@ -226,7 +231,9 @@ class StoveViewModel: ObservableObject {
                             self.waterTemp = mapped.water
                             self.waterPressure = mapped.pressure
                             updateStatusLabel(mapped.status)
-                            self.pelletManager.updateTracking(statusCode: mapped.status, powerLevel: mapped.powerLevel, isWood: mapped.isWood)
+                            if self.isPelletTankEnabled {
+                                self.pelletManager.updateTracking(statusCode: mapped.status, powerLevel: mapped.powerLevel, isWood: mapped.isWood)
+                            }
                             self.lastRawMessage = "Cloud Live-Daten empfangen."
                         } else if let vals = data.values ?? data.data {
                             if let r = vals["I30006"] ?? vals["30006"], let rv = Double(r) { self.currentTemp = rv / 10.0 }
@@ -287,7 +294,9 @@ class StoveViewModel: ObservableObject {
                     self.waterTemp = mapped.water
                     self.waterPressure = mapped.pressure
                     updateStatusLabel(mapped.status)
-                    self.pelletManager.updateTracking(statusCode: mapped.status, powerLevel: mapped.powerLevel, isWood: mapped.isWood)
+                    if self.isPelletTankEnabled {
+                        self.pelletManager.updateTracking(statusCode: mapped.status, powerLevel: mapped.powerLevel, isWood: mapped.isWood)
+                    }
                     return
                 }
             }
@@ -317,7 +326,9 @@ class StoveViewModel: ObservableObject {
         case "30001": 
             let st = Int(val)
             updateStatusLabel(st)
-            self.pelletManager.updateTracking(statusCode: st, powerLevel: 3, isWood: (st == 13))
+            if self.isPelletTankEnabled {
+                self.pelletManager.updateTracking(statusCode: st, powerLevel: 3, isWood: (st == 13))
+            }
         case "30005": self.exhaustTemp = val / 10.0
         case "30006": self.currentTemp = val / 10.0
         case "30017": self.waterTemp = val / 10.0

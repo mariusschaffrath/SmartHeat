@@ -96,7 +96,9 @@ struct DashboardView: View {
                     }
                 }
                 
-                PelletTankCard(pelletManager: viewModel.pelletManager, stoveStatus: viewModel.stoveStatus)
+                if viewModel.isPelletTankEnabled {
+                    PelletTankCard(pelletManager: viewModel.pelletManager, stoveStatus: viewModel.stoveStatus)
+                }
                 
                 VStack(spacing: 20) {
                     HStack {
