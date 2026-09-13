@@ -93,4 +93,79 @@ final class StoveIntegrationTests: XCTestCase {
             XCTAssertEqual(status, 0, "Status sollte 0 (AUS) sein")
         }
     }
+    
+    func testPelletTankManagerInitializationAndRefill() {
+        let manager = PelletTankManager()
+        XCTAssertEqual(manager.tankCapacity, 20.0, "Dielle Ghibli Kombi 10 kW hat 20.0 kg Tankkapazität")
+        XCTAssertEqual(manager.bagWeight, 15.0, "Standard-Sackgröße ist 15.0 kg")
+        
+        // Voll befüllen
+        manager.refillFull()
+        XCTAssertEqual(manager.currentLevel, 20.0)
+        XCTAssertEqual(manager.fillPercentage, 100.0)
+        XCTAssertFalse(manager.isLowPellet)
+        
+        // Fast leer setzen (4 kg = 20%)
+        manager.setLevel(kg: 4.0)
+        XCTAssertEqual(manager.currentLevel, 4.0)
+        XCTAssertEqual(manager.fillPercentage, 20.0)
+        XCTAssertTrue(manager.isLowPellet)
+        
+        // +1 Sack (15 kg) nachfüllen -> 4 + 15 = 19 kg
+        manager.refillBag()
+        XCTAssertEqual(manager.currentLevel, 19.0)
+        XCTAssertEqual(manager.fillPercentage, 95.0)
+        XCTAssertFalse(manager.isLowPellet)
+        
+        // Weiterer Sack wird bei 20.0 kg gekappt
+        manager.refillBag()
+        XCTAssertEqual(manager.currentLevel, 20.0)
+    }
+    
+    func testPelletTankConsumptionAndWoodMode() {
+        let manager = PelletTankManager()
+        manager.setLevel(kg: 10.0)
+        
+        // Test P1 bis P5 Verbrauchsraten für Ghibli 10 kW
+        manager.updateTracking(statusCode: 5, powerLevel: 1, isWood: false)
+        XCTAssertEqual(manager.currentHourlyConsumption, 0.65, accuracy: 0.001, "P1 Teillast: 0.65 kg/h")
+        XCTAssertEqual(manager.remainingHours, 10.0 / 0.65, accuracy: 0.1)
+        
+        manager.updateTracking(statusCode: 5, powerLevel: 5, isWood: false)
+        XCTAssertEqual(manager.currentHourlyConsumption, 2.25, accuracy: 0.001, "P5 Volllast: 2.25 kg/h")
+        XCTAssertEqual(manager.remainingHours, 10.0 / 2.25, accuracy: 0.1)
+        
+        // Scheitholzbetrieb aktiv -> Verbrauch muss auf 0 pausieren
+        manager.updateTracking(statusCode: 13, powerLevel: 3, isWood: true)
+        XCTAssertTrue(manager.isWoodModeActive)
+        XCTAssertEqual(manager.currentHourlyConsumption, 0.0, "Holzverbrennung verbraucht 0.0 kg/h Pellets")
+        
+        // Zündungs-Primer Abzug (200g) beim Start von AUS -> Zündung
+        manager.updateTracking(statusCode: 0, powerLevel: 1, isWood: false)
+        let beforeIgnition = manager.currentLevel
+        manager.updateTracking(statusCode: 2, powerLevel: 1, isWood: false)
+        XCTAssertEqual(manager.currentLevel, beforeIgnition - 0.20, accuracy: 0.001, "Zündungs-Primer von 200g abgezogen")
+    }
+    
+    func testTelemetryExtendedPowerAndWoodDecoding() {
+        let liveDump = [
+            "1000010000000007160300d704000000028801",
+            "0c81013100010b060501000000b401",
+            "12ffff0015000000000100000000000000",
+            "12fff700d7000000000101000000000000",
+            "0e016c00030001000600000001016c0007",
+            "0e01ed00b4006401900001000101ed0000"
+        ]
+        
+        let result = cloudService.parseAllTelemetry(liveDump)
+        XCTAssertNotNil(result)
+        if let (room, exhaust, target, status, powerLevel, isWood) = result {
+            XCTAssertEqual(room, 21.5, accuracy: 0.01)
+            XCTAssertEqual(exhaust, 21.0, accuracy: 0.01)
+            XCTAssertEqual(target, 18.0, accuracy: 0.01)
+            XCTAssertEqual(status, 0)
+            XCTAssertEqual(powerLevel, 3, "0e016c mit 0003 setzt Power-Stufe auf 3")
+            XCTAssertFalse(isWood)
+        }
+    }
 }

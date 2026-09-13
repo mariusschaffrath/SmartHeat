@@ -61,6 +61,8 @@ public struct CloudStoveData: Codable {
         var water: Double = 0
         var pressure: Double = 0
         var status: Int = 0
+        var powerLevel: Int = 1
+        var isWood: Bool = false
         
         for (index, block) in array.enumerated() {
             // 1. Block 0 or prefix "10" (0x10 = 519_MAINVALUES)
@@ -68,6 +70,9 @@ public struct CloudStoveData: Codable {
                 // Status at offset 10..12
                 if let stHex = extractHex(from: block, start: 10, length: 2), let st = Int(stHex, radix: 16) {
                     status = st
+                    if st == 13 {
+                        isWood = true
+                    }
                 }
                 
                 // Multiplier (pos_punto) from offset 36..38 (default: 0.1)
@@ -99,6 +104,16 @@ public struct CloudStoveData: Codable {
             
             // 2. Info Block with prefix "0c81" (state_info_81)
             if block.hasPrefix("0c81") {
+                // Power level at offset 14..16
+                if let pwrHex = extractHex(from: block, start: 14, length: 2), let pwr = Int(pwrHex, radix: 16) {
+                    if pwr >= 1 && pwr <= 5 {
+                        powerLevel = pwr
+                    } else if pwr == 6 {
+                        // Auto modulation
+                        powerLevel = (status == 6) ? 1 : 3
+                    }
+                }
+                
                 var multTerm: Double = 0.1
                 if block.count >= 30, let ppHex = extractHex(from: block, start: 28, length: 2), let pp = Int(ppHex, radix: 16) {
                     switch pp {
@@ -159,13 +174,26 @@ public struct CloudStoveData: Codable {
                         }
                     case "0180": // Water Target (20180)
                         water = Double(rawVal) * mult
+                    case "016c": // Pellet Flame power setting
+                        if rawVal >= 1 && rawVal <= 5 {
+                            powerLevel = rawVal
+                        }
+                    case "016b": // Wood Flame setting
+                        if status == 13 || (rawVal > 0 && status != 5 && status != 6) {
+                            isWood = true
+                        }
                     default: break
                     }
                 }
             }
         }
         
-        return (room, exhaust, target, water, pressure, status)
+        if status == 6 {
+            // Modulation is lowest burn level
+            powerLevel = 1
+        }
+        
+        return (room, exhaust, target, water, pressure, status, powerLevel, isWood)
     }
     
     private func extractSignedInt16(from hex: String, start: Int) -> Int? {
@@ -198,6 +226,13 @@ class CloudService: ObservableObject {
         let data = CloudStoveData(deviceKey: nil, isOnline: nil, values: nil, Values: values, data: nil)
         guard let mapped = data.getMappedValues() else { return nil }
         return (mapped.room, mapped.exhaust, mapped.target, mapped.status)
+    }
+    
+    /// Extended helper returning power level and wood mode as well
+    public func parseAllTelemetry(_ values: [String]) -> (room: Double, exhaust: Double, target: Double, status: Int, powerLevel: Int, isWood: Bool)? {
+        let data = CloudStoveData(deviceKey: nil, isOnline: nil, values: nil, Values: values, data: nil)
+        guard let mapped = data.getMappedValues() else { return nil }
+        return (mapped.room, mapped.exhaust, mapped.target, mapped.status, mapped.powerLevel, mapped.isWood)
     }
     
     /// Fetches live stove telemetry from Cloud using official Dielle REST endpoints (/Summary?ids= and /RealTime?id=)

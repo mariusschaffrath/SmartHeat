@@ -23,6 +23,70 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
+                
+                Section(header: Text("Pellet-Tank & Verbrauch (Ghibli Kombi 10 kW)")) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Füllstand:")
+                            Spacer()
+                            Text("\(String(format: "%.1f", viewModel.pelletManager.currentLevel)) / \(String(format: "%.0f", viewModel.pelletManager.tankCapacity)) kg (\(String(format: "%.0f", viewModel.pelletManager.fillPercentage))%)")
+                                .font(.system(.subheadline, design: .rounded).bold())
+                                .foregroundColor(.orange)
+                        }
+                        
+                        Slider(
+                            value: $viewModel.pelletManager.currentLevel,
+                            in: 0...viewModel.pelletManager.tankCapacity,
+                            step: 0.5
+                        )
+                        .accentColor(.orange)
+                    }
+                    .padding(.vertical, 4)
+                    
+                    HStack {
+                        Text("Tankkapazität")
+                        Spacer()
+                        Text("\(String(format: "%.0f", viewModel.pelletManager.tankCapacity)) kg")
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    HStack {
+                        Text("Standard-Pelletsack")
+                        Spacer()
+                        Text("\(String(format: "%.0f", viewModel.pelletManager.bagWeight)) kg")
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    if let lastRefill = viewModel.pelletManager.lastRefillDate {
+                        HStack {
+                            Text("Letzte Befüllung")
+                            Spacer()
+                            Text(lastRefill.formatted(date: .abbreviated, time: .shortened))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    DisclosureGroup("Verbrauchskalibrierung 10 kW") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Werkseitig hinterlegte Verbrauchsdaten:")
+                                .font(.caption).bold()
+                                .foregroundColor(.secondary)
+                            
+                            Group {
+                                HStack { Text("• P1 (Teillast 2.8 kW):"); Spacer(); Text("0.65 kg/h (~31h)") }
+                                HStack { Text("• P2 (Niedrig 4.5 kW):"); Spacer(); Text("0.95 kg/h (~21h)") }
+                                HStack { Text("• P3 (Mittel 6.5 kW):"); Spacer(); Text("1.35 kg/h (~15h)") }
+                                HStack { Text("• P4 (Hoch 8.5 kW):"); Spacer(); Text("1.80 kg/h (~11h)") }
+                                HStack { Text("• P5 (Volllast 10 kW):"); Spacer(); Text("2.25 kg/h (~9h)") }
+                                HStack { Text("• Scheitholzbetrieb:"); Spacer(); Text("0.00 kg/h (pausiert)") }
+                                HStack { Text("• Zündungs-Primer:"); Spacer(); Text("200 g einmalig") }
+                            }
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
 
                 Section(header: Text("🧪 Simulator / Gegenspieler (Testmodus)")) {
                     Toggle("Simulator-Modus verwenden", isOn: $viewModel.isSimulatorMode)
