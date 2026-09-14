@@ -8,10 +8,6 @@ struct LoginView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     
-    // Tap counter for hidden Simulator skip button
-    @State private var setupTapCount = 0
-    @State private var showSimulatorSkip = false
-    
     @FocusState private var focusedField: Field?
     
     enum Field {
@@ -99,7 +95,7 @@ struct LoginView: View {
                         }
                         
                         VStack(spacing: 12) {
-                            Button(action: handleLoginTap) {
+                            Button(action: performLogin) {
                                 HStack {
                                     if isLoading {
                                         ProgressView()
@@ -116,27 +112,6 @@ struct LoginView: View {
                                 .cornerRadius(12)
                             }
                             .disabled(email.isEmpty || password.isEmpty || isLoading)
-                            
-                            if showSimulatorSkip {
-                                Button(action: skipToSimulator) {
-                                    HStack {
-                                        Image(systemName: "bolt.horizontal.fill")
-                                        Text("🧪 Im Simulator-Modus fortfahren (Skip)")
-                                            .bold()
-                                    }
-                                    .font(.footnote)
-                                    .foregroundColor(.purple)
-                                    .padding()
-                                    .frame(maxWidth: .infinity)
-                                    .background(Color.purple.opacity(0.12))
-                                    .cornerRadius(12)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(Color.purple.opacity(0.3), lineWidth: 1)
-                                    )
-                                }
-                                .transition(.scale.combined(with: .opacity))
-                            }
                         }
                         .padding(.horizontal, 30)
                         .padding(.top, 10)
@@ -151,20 +126,10 @@ struct LoginView: View {
                 if focusedField == .email {
                     focusedField = .password
                 } else {
-                    handleLoginTap()
+                    performLogin()
                 }
             }
         }
-    }
-    
-    private func handleLoginTap() {
-        setupTapCount += 1
-        if setupTapCount >= 3 {
-            withAnimation {
-                showSimulatorSkip = true
-            }
-        }
-        performLogin()
     }
     
     private func performLogin() {
@@ -190,15 +155,6 @@ struct LoginView: View {
                 errorMessage = "Login fehlgeschlagen: \(error.localizedDescription)"
                 isLoading = false
             }
-        }
-    }
-    
-    private func skipToSimulator() {
-        withAnimation {
-            authService.isAuthenticated = true
-            let dummyEmail = email.isEmpty ? "simulator@smartheat.local" : email
-            KeychainService.shared.save(dummyEmail, key: "cloud_email")
-            KeychainService.shared.save("simulator123", key: "cloud_password")
         }
     }
 }

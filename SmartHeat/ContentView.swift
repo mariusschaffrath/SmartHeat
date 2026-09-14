@@ -47,20 +47,6 @@ struct ContentView: View {
                         .padding(.top, 20)
                         
                         DashboardView(viewModel: viewModel)
-                        
-                        // DEBUG CONSOLE IN UI
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("DEBUG LOG:")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundColor(.secondary)
-                            Text(viewModel.lastRawMessage.isEmpty ? "Warten auf Daten..." : viewModel.lastRawMessage)
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundColor(.orange)
-                                .lineLimit(2)
-                        }
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.black.opacity(0.05))
                     }
                 }
                 .sheet(isPresented: $showingSettings) {

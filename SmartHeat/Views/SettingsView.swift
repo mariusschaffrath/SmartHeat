@@ -96,14 +96,6 @@ struct SettingsView: View {
                     }
                 }
 
-                Section(header: Text("🧪 Simulator / Gegenspieler (Testmodus)")) {
-                    Toggle("Simulator-Modus verwenden", isOn: $viewModel.isSimulatorMode)
-                        .tint(.purple)
-                    Text("Verbindet mit dem lokalen Ofen- & Cloud-Simulator auf 127.0.0.1 zum Testen ohne echten Ofen.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-
                 Section(header: Text("Cloud Anbindung")) {
                     if viewModel.authService.isAuthenticated {
                         VStack(alignment: .leading, spacing: 10) {
@@ -155,22 +147,9 @@ struct SettingsView: View {
                                                 dismiss()
                                             }
                                             .buttonStyle(.borderedProminent)
-                                            .controlSize(.small)
+                                             .controlSize(.small)
                                         }
                                     }
-                                    
-                                    Divider()
-                                    
-                                    Text("Diagnose (Server Antwort):")
-                                        .font(.caption2)
-                                        .fontWeight(.bold)
-                                    
-                                    Text(viewModel.cloudService.lastCloudResponse.isEmpty ? "Warten auf Antwort..." : viewModel.cloudService.lastCloudResponse)
-                                        .font(.system(size: 8, design: .monospaced))
-                                        .foregroundColor(.secondary)
-                                        .padding(8)
-                                        .background(Color.black.opacity(0.05))
-                                        .cornerRadius(8)
                                 }
                             } else {
                                 ForEach(viewModel.authService.devices) { device in
@@ -254,12 +233,6 @@ struct SettingsView: View {
                         }
                         .disabled(viewModel.discoveryService.isScanning)
                     }
-                }
-                
-                Section(header: Text("Discovery Logs")) {
-                    Text(viewModel.discoveryService.logs.isEmpty ? "Bereit für Suche" : viewModel.discoveryService.logs)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.secondary)
                 }
             }
             .navigationTitle("Einstellungen")

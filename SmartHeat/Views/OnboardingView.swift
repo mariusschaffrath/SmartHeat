@@ -8,10 +8,6 @@ struct OnboardingView: View {
     @State private var isAuthenticating = false
     @State private var errorMessage: String?
     
-    // Tap counter for hidden Simulator skip button
-    @State private var setupTapCount = 0
-    @State private var showSimulatorSkip = false
-    
     var body: some View {
         ZStack {
             Color(uiColor: .systemBackground).ignoresSafeArea()
@@ -88,7 +84,7 @@ struct OnboardingView: View {
                 .padding(.horizontal, 30)
                 
                 VStack(spacing: 12) {
-                    Button(action: handleSetupTap) {
+                    Button(action: startSetup) {
                         HStack {
                             if isAuthenticating {
                                 ProgressView().tint(.white)
@@ -105,28 +101,6 @@ struct OnboardingView: View {
                         .shadow(color: .orange.opacity(email.isEmpty ? 0 : 0.3), radius: 10, x: 0, y: 5)
                     }
                     .disabled(email.isEmpty || password.isEmpty || isAuthenticating)
-                    
-                    // Hidden Skip Button (appears after 3 taps on setup button)
-                    if showSimulatorSkip {
-                        Button(action: skipToSimulator) {
-                            HStack {
-                                Image(systemName: "bolt.horizontal.fill")
-                                Text("🧪 Im Simulator-Modus fortfahren (Skip)")
-                                    .fontWeight(.bold)
-                            }
-                            .font(.footnote)
-                            .foregroundColor(.purple)
-                            .padding(.vertical, 12)
-                            .frame(maxWidth: .infinity)
-                            .background(Color.purple.opacity(0.12))
-                            .cornerRadius(12)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Color.purple.opacity(0.3), lineWidth: 1)
-                            )
-                        }
-                        .transition(.scale.combined(with: .opacity))
-                    }
                 }
                 .padding(.horizontal, 30)
                 
@@ -138,16 +112,6 @@ struct OnboardingView: View {
                     .padding(.bottom, 10)
             }
         }
-    }
-    
-    private func handleSetupTap() {
-        setupTapCount += 1
-        if setupTapCount >= 3 {
-            withAnimation {
-                showSimulatorSkip = true
-            }
-        }
-        startSetup()
     }
     
     private func startSetup() {
@@ -168,16 +132,6 @@ struct OnboardingView: View {
                     isAuthenticating = false
                 }
             }
-        }
-    }
-    
-    private func skipToSimulator() {
-        withAnimation {
-            viewModel.isSimulatorMode = true
-            viewModel.authService.isAuthenticated = true
-            let dummyEmail = email.isEmpty ? "simulator@smartheat.local" : email
-            KeychainService.shared.save(dummyEmail, key: "cloud_email")
-            KeychainService.shared.save("simulator123", key: "cloud_password")
         }
     }
 }
