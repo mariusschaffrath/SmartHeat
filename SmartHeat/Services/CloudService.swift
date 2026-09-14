@@ -52,7 +52,7 @@ public struct CloudStoveData: Codable {
     }
     
     /// Parses 2ways / syevo hex array matching official Dielle SERVIZI2W logic
-    public func getMappedValues() -> (room: Double, exhaust: Double, target: Double, water: Double, pressure: Double, status: Int)? {
+    public func getMappedValues() -> (room: Double, exhaust: Double, target: Double, water: Double, pressure: Double, status: Int, powerLevel: Int, isWood: Bool)? {
         guard let array = Values, !array.isEmpty else { return nil }
         
         var room: Double = 0

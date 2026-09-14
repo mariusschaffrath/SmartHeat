@@ -35,6 +35,14 @@ public struct StoveDevice: Codable, Identifiable, Equatable {
             ?? (foundId.count <= 10 && !foundId.isEmpty ? foundId : nil)
         self.values = try? container.decodeIfPresent([String].self, forKey: .values)
     }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encodeIfPresent(serialNumber, forKey: .serialNumber)
+        try container.encodeIfPresent(values, forKey: .values)
+    }
 }
 
 @MainActor
