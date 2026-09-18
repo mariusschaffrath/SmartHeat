@@ -11,7 +11,7 @@ public struct StoveCommand: Codable, Equatable {
     // Core Commands (Power) - Exact 2ways Dielle FileMap specification for device 25016460
     public static let turnOn = StoveCommand(rawString: "05040000")
     public static let turnOff = StoveCommand(rawString: "05050000")
-    public static let unlock = StoveCommand(rawString: "05050000")
+    public static let unlock = StoveCommand(rawString: "050a0000") // 2ways Dielle sblocco / alarm reset
     
     // Read / Polling Commands
     public static let poll2Ways = StoveCommand(rawString: "2WL0")

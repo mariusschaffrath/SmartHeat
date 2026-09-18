@@ -125,7 +125,8 @@ struct OnboardingView: View {
                 try await viewModel.authService.login(email: email, password: password)
                 KeychainService.shared.save(email, key: "cloud_email")
                 KeychainService.shared.save(password, key: "cloud_password")
-                withAnimation { isAuthenticating = false }
+                UserDefaults.standard.set(true, forKey: "has_saved_account")
+                withAnimation(.easeInOut(duration: 0.3)) { isAuthenticating = false }
             } catch {
                 withAnimation {
                     errorMessage = "Login fehlgeschlagen. Bitte prüfen Sie Ihre Zugangsdaten."

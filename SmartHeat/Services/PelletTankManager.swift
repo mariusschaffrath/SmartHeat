@@ -38,6 +38,7 @@ public class PelletTankManager: ObservableObject {
     
     @Published public var isWoodModeActive: Bool = false
     @Published public var currentPowerLevel: Int = 1
+    @Published public var isHomeAssistantBacked: Bool = false
     @Published public var lastRefillDate: Date? {
         didSet {
             if let date = lastRefillDate {
@@ -58,6 +59,13 @@ public class PelletTankManager: ObservableObject {
         if let savedRefill = UserDefaults.standard.object(forKey: "pellet_last_refill") as? Double {
             self.lastRefillDate = Date(timeIntervalSince1970: savedRefill)
         }
+    }
+    
+    // MARK: - Home Assistant 24/7 Integration
+    public func syncFromHomeAssistant(levelKg: Double) {
+        guard levelKg >= 0 && levelKg <= tankCapacity + 5.0 else { return }
+        self.currentLevel = min(tankCapacity, levelKg)
+        self.isHomeAssistantBacked = true
     }
     
     // MARK: - Computed Properties
@@ -86,12 +94,18 @@ public class PelletTankManager: ObservableObject {
     public func refillBag() {
         currentLevel = min(tankCapacity, currentLevel + bagWeight)
         lastRefillDate = Date()
+        Task {
+            await HomeAssistantService.shared.syncRefillToHomeAssistant(isFull: false)
+        }
     }
     
     /// Resets the tank to 100% capacity (20 kg)
     public func refillFull() {
         currentLevel = tankCapacity
         lastRefillDate = Date()
+        Task {
+            await HomeAssistantService.shared.syncRefillToHomeAssistant(isFull: true)
+        }
     }
     
     /// Manually sets the level to a specific kg amount (e.g. from slider)

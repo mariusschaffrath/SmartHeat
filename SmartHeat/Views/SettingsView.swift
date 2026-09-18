@@ -11,11 +11,156 @@ struct StatusIndicator: View {
 
 struct SettingsView: View {
     @ObservedObject var viewModel: StoveViewModel
+    @ObservedObject var errorLogManager = StoveErrorLogManager.shared
+    @ObservedObject var notificationManager = NotificationManager.shared
     @Environment(\.dismiss) var dismiss
+    @AppStorage("app_appearance_mode") private var appearanceMode: String = "dark"
+    
+    @State private var showingTestNotificationSent = false
+    @State private var showingPermissionDeniedAlert = false
+    @State private var isSendingTestNotification = false
+    
+    private var appearanceDescription: String {
+        switch appearanceMode {
+        case "dark":
+            return "Dunkelmodus ist dauerhaft aktiv (optimal für das Liquid Glass Design und OLED)."
+        case "light":
+            return "Helles Erscheinungsbild ist dauerhaft aktiv."
+        default:
+            return "Automatisch: Das Design passt sich dynamisch an die iOS-Systemeinstellungen an."
+        }
+    }
     
     var body: some View {
         NavigationView {
             List {
+                Section(header: Text("Erscheinungsbild")) {
+                    Toggle("Dunkelmodus immer ein", isOn: Binding(
+                        get: { appearanceMode == "dark" },
+                        set: { appearanceMode = $0 ? "dark" : "system" }
+                    ))
+                    .tint(.orange)
+                    
+                    Picker("Design-Modus", selection: $appearanceMode) {
+                        Text("Automatisch").tag("system")
+                        Text("Immer Dunkel").tag("dark")
+                        Text("Immer Hell").tag("light")
+                    }
+                    .pickerStyle(.segmented)
+                    
+                    Text(appearanceDescription)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                Section(header: Text("Diagnose & Fehlerspeicher")) {
+                    NavigationLink(destination: ErrorHistoryView(viewModel: viewModel)) {
+                        HStack(spacing: 12) {
+                            Image(systemName: errorLogManager.unresolvedCount > 0 ? "exclamationmark.triangle.fill" : "list.clipboard.fill")
+                                .foregroundColor(errorLogManager.unresolvedCount > 0 ? .red : .orange)
+                                .font(.title3)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Fehler- & Alarmhistorie")
+                                    .font(.subheadline.bold())
+                                Text(errorLogManager.unresolvedCount > 0 ? "\(errorLogManager.unresolvedCount) aktive Störung(en)" : "Hardware-Fehlercodes mit Diagnose")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Spacer()
+                            
+                            if errorLogManager.unresolvedCount > 0 {
+                                Text("\(errorLogManager.unresolvedCount)")
+                                    .font(.caption2.bold())
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 3)
+                                    .background(Color.red, in: Capsule())
+                            }
+                        }
+                    }
+                    
+                    NavigationLink(destination: StoveDiagnosticsView(viewModel: viewModel)) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "stethoscope")
+                                .foregroundColor(.blue)
+                                .font(.title3)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Betriebsdaten & Wartung")
+                                    .font(.subheadline.bold())
+                                Text("Laufzeit, Zündungen & 2.000h Service")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+                
+                Section(header: Text("Mitteilungen & Alarme")) {
+                    Toggle("Pellet-Vorrat Warnung (< 4 kg)", isOn: $notificationManager.lowPelletNotifications)
+                        .tint(.orange)
+                    
+                    Toggle("Ofen-Störungen & Alarme (Er01..15)", isOn: $notificationManager.stoveErrorNotifications)
+                        .tint(.red)
+                    
+                    Toggle("Zündungsabschluss mitteilen", isOn: $notificationManager.ignitionFinishedNotifications)
+                        .tint(.green)
+                    
+                    Button(action: {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        Task {
+                            isSendingTestNotification = true
+                            defer { isSendingTestNotification = false }
+                            
+                            let center = UNUserNotificationCenter.current()
+                            let settings = await center.notificationSettings()
+                            
+                            if settings.authorizationStatus == .denied {
+                                showingPermissionDeniedAlert = true
+                                return
+                            }
+                            
+                            let granted = await notificationManager.requestAuthorization()
+                            if granted {
+                                notificationManager.sendTestNotification { success in
+                                    if success {
+                                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                            showingTestNotificationSent = true
+                                        }
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                                            withAnimation(.easeInOut(duration: 0.3)) {
+                                                showingTestNotificationSent = false
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                showingPermissionDeniedAlert = true
+                            }
+                        }
+                    }) {
+                        HStack(spacing: 8) {
+                            if isSendingTestNotification {
+                                ProgressView()
+                                    .scaleEffect(0.85)
+                            }
+                            
+                            Label(
+                                showingTestNotificationSent ? "Test-Mitteilung gesendet! ✓" : "Test-Mitteilung senden",
+                                systemImage: showingTestNotificationSent ? "checkmark.circle.fill" : "bell.badge.fill"
+                            )
+                            .font(.caption.bold())
+                            .foregroundColor(showingTestNotificationSent ? .green : .orange)
+                            
+                            Spacer()
+                        }
+                    }
+                    .disabled(isSendingTestNotification)
+                }
+                
                 Section(header: Text("Ofen-Konfiguration")) {
                     Toggle("Wassergeführter Ofen", isOn: $viewModel.isWaterStove)
                         .tint(.blue)
@@ -93,6 +238,77 @@ struct SettingsView: View {
                             }
                             .padding(.vertical, 4)
                         }
+                    }
+                }
+                
+                Section(header: Text("Home Assistant 24/7 Speicher & Sync")) {
+                    Toggle("24/7 Historie & Pellettank aktivieren", isOn: $viewModel.haService.isEnabled)
+                        .tint(.blue)
+                    
+                    Text("Wichtig: Die Steuerung des Ofens (Ein/Aus, Temperatur, Gebläse) erfolgt immer direkt über die Dielle Cloud. Home Assistant dient rein als 24/7-Datenspeicher für die Temperaturkurven und den kontinuierlichen Pelletstand.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    if viewModel.haService.isEnabled {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Server-Adresse (URL):").font(.caption).foregroundColor(.secondary)
+                            TextField("http://192.168.178.131:8123", text: $viewModel.haService.serverURL)
+                                .font(.system(size: 13, design: .monospaced))
+                                .textFieldStyle(.roundedBorder)
+                                .autocapitalization(.none)
+                                .disableAutocorrection(true)
+                        }
+                        .padding(.vertical, 2)
+                        
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Langlebiger Zugriffs-Token (Long-Lived Token):").font(.caption).foregroundColor(.secondary)
+                            SecureField("Token aus Home Assistant Profil...", text: $viewModel.haService.accessToken)
+                                .font(.system(size: 13, design: .monospaced))
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        .padding(.vertical, 2)
+                        
+                        HStack {
+                            Text("Status:")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(viewModel.haService.statusMessage)
+                                .font(.caption)
+                                .foregroundColor(viewModel.haService.isConnected ? .green : .orange)
+                        }
+                        
+                        if let lastSync = viewModel.haService.lastSyncDate {
+                            HStack {
+                                Text("Letzter Sync:")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Text(lastSync.formatted(date: .omitted, time: .standard))
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        
+                        HStack {
+                            Spacer()
+                            Button(action: {
+                                Task {
+                                    _ = await viewModel.haService.testConnection()
+                                    await viewModel.syncHomeAssistantData()
+                                }
+                            }) {
+                                if viewModel.haService.isSyncing {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Label("Verbindung testen & synchronisieren", systemImage: "arrow.triangle.2.circlepath")
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                        }
+                        .padding(.top, 4)
                     }
                 }
 
@@ -189,57 +405,33 @@ struct SettingsView: View {
                     }
                 }
                 
-                Section(header: Text("Lokale Direktverbindung (WLAN)")) {
-                    Toggle("WLAN-Direktverbindung verwenden", isOn: $viewModel.useWLANConnection)
-                        .tint(.blue)
+                Section(header: Text("4Heat Cloud Status")) {
+                    HStack {
+                        Label("Cloud Verbindung", systemImage: "cloud.fill")
+                        Spacer()
+                        StatusIndicator(isActive: viewModel.authService.isAuthenticated)
+                    }
                     
-                    if !viewModel.useWLANConnection {
-                        Text("🔒 WLAN-Direktmodus ist deaktiviert. Die App kommuniziert ausschließlich über die Cloud (myDielle / 4Heat).")
+                    HStack {
+                        Text("Live Telemetrie")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(viewModel.lastRawMessage.isEmpty ? "Verbunden" : viewModel.lastRawMessage)
                             .font(.caption)
                             .foregroundColor(.secondary)
-                    } else {
-                        HStack {
-                            TextField("Manuelle IP", text: $viewModel.manualIP)
-                                .keyboardType(.numbersAndPunctuation)
-                                .autocapitalization(.none)
-                                .disableAutocorrection(true)
-                                .onChange(of: viewModel.manualIP) { newValue in
-                                    let filtered = newValue.replacingOccurrences(of: ",", with: ".")
-                                    if filtered != newValue {
-                                        viewModel.manualIP = filtered
-                                    }
-                                }
-                            Button("Verbinden") {
-                                viewModel.socketService.connect(host: viewModel.manualIP)
-                            }
-                        }
-                        
-                        HStack {
-                            Label("WLAN Status", systemImage: "wifi")
-                            Spacer()
-                            StatusIndicator(isActive: viewModel.socketService.isConnected)
-                        }
-                        
-                        Button(action: {
-                            viewModel.discoveryService.discoverStove()
-                        }) {
-                            HStack {
-                                Label(viewModel.discoveryService.isScanning ? "Suche läuft..." : "Automatisch suchen", systemImage: "magnifyingglass")
-                                if viewModel.discoveryService.isScanning {
-                                    Spacer()
-                                    ProgressView()
-                                }
-                            }
-                        }
-                        .disabled(viewModel.discoveryService.isScanning)
                     }
                 }
             }
             .navigationTitle("Einstellungen")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Fertig") { dismiss() }
+            .alert("Mitteilungen deaktiviert", isPresented: $showingPermissionDeniedAlert) {
+                Button("Einstellungen öffnen") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
                 }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text("SmartHeat darf dir aktuell keine Mitteilungen senden. Bitte aktiviere die Berechtigung in den iOS-Einstellungen unter Mitteilungen > SmartHeat.")
             }
         }
     }

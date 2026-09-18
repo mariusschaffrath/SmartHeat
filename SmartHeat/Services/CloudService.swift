@@ -52,7 +52,7 @@ public struct CloudStoveData: Codable {
     }
     
     /// Parses 2ways / syevo hex array matching official Dielle SERVIZI2W logic
-    public func getMappedValues() -> (room: Double, exhaust: Double, target: Double, water: Double, pressure: Double, status: Int, powerLevel: Int, isWood: Bool)? {
+    public func getMappedValues() -> (room: Double, exhaust: Double, target: Double, water: Double, pressure: Double, status: Int, powerLevel: Int, flurFan: Int, kanal1: Int, kanal2: Int, isWood: Bool, errorCode: Int)? {
         guard let array = Values, !array.isEmpty else { return nil }
         
         var room: Double = 0
@@ -62,7 +62,11 @@ public struct CloudStoveData: Codable {
         var pressure: Double = 0
         var status: Int = 0
         var powerLevel: Int = 1
+        var flurFan: Int = 1
+        var kanal1: Int = 1
+        var kanal2: Int = 1
         var isWood: Bool = false
+        var errorCode: Int = 0
         
         for (index, block) in array.enumerated() {
             // 1. Block 0 or prefix "10" (0x10 = 519_MAINVALUES)
@@ -73,6 +77,11 @@ public struct CloudStoveData: Codable {
                     if st == 13 {
                         isWood = true
                     }
+                }
+                
+                // Hardware Error / Alarm code at offset 12..14 (Dielle errore: Er01..Er42)
+                if let errHex = extractHex(from: block, start: 12, length: 2), let err = Int(errHex, radix: 16) {
+                    errorCode = err
                 }
                 
                 // Multiplier (pos_punto) from offset 36..38 (default: 0.1)
@@ -104,13 +113,18 @@ public struct CloudStoveData: Codable {
             
             // 2. Info Block with prefix "0c81" (state_info_81)
             if block.hasPrefix("0c81") {
-                // Power level at offset 14..16
-                if let pwrHex = extractHex(from: block, start: 14, length: 2), let pwr = Int(pwrHex, radix: 16) {
+                // Power level from ASCII at offset 6..8 or hex at 14..16
+                if let pwrHex = extractHex(from: block, start: 6, length: 2),
+                   let asciiVal = UInt8(pwrHex, radix: 16),
+                   let pwr = Int(String(Character(UnicodeScalar(asciiVal)))),
+                   pwr >= 1 && pwr <= 5 {
+                    powerLevel = pwr
+                } else if let pwrHex = extractHex(from: block, start: 14, length: 2), let pwr = Int(pwrHex, radix: 16) {
                     if pwr >= 1 && pwr <= 5 {
                         powerLevel = pwr
                     } else if pwr == 6 {
                         // Auto modulation
-                        powerLevel = (status == 6) ? 1 : 3
+                        powerLevel = (status == 6) ? 1 : 6
                     }
                 }
                 
@@ -175,12 +189,21 @@ public struct CloudStoveData: Codable {
                     case "0180": // Water Target (20180)
                         water = Double(rawVal) * mult
                     case "016c": // Pellet Flame power setting
-                        if rawVal >= 1 && rawVal <= 5 {
+                        if rawVal >= 1 && rawVal <= 6 {
                             powerLevel = rawVal
                         }
-                    case "016b": // Wood Flame setting
-                        if status == 13 || (rawVal > 0 && status != 5 && status != 6) {
+                    case "016b": // Wood Flame setting: only true if stove is actively in wood mode (status 13)
+                        if status == 13 {
                             isWood = true
+                        }
+                    case "027e": // Kanal 1 / Canalizzazione 1 (Flur - P1)
+                        kanal1 = rawVal
+                        flurFan = rawVal
+                    case "0266": // Kanal 2 / Canalizzazione 2 (P2)
+                        kanal2 = rawVal
+                    case "017d": // Ducted fan single fallback
+                        if kanal1 == 1 && kanal2 == 1 {
+                            flurFan = rawVal
                         }
                     default: break
                     }
@@ -193,7 +216,7 @@ public struct CloudStoveData: Codable {
             powerLevel = 1
         }
         
-        return (room, exhaust, target, water, pressure, status, powerLevel, isWood)
+        return (room, exhaust, target, water, pressure, status, powerLevel, flurFan, kanal1, kanal2, isWood, errorCode)
     }
     
     private func extractSignedInt16(from hex: String, start: Int) -> Int? {
@@ -211,7 +234,9 @@ public struct CloudStoveData: Codable {
 }
 
 @MainActor
-class CloudService: ObservableObject {
+public class CloudService: ObservableObject {
+    public static let shared = CloudService()
+    
     @Published var lastCloudResponse: String = ""
     @Published var activeError: StoveError?
     
@@ -235,80 +260,92 @@ class CloudService: ObservableObject {
         return (mapped.room, mapped.exhaust, mapped.target, mapped.status, mapped.powerLevel, mapped.isWood)
     }
     
+    /// Extended helper returning hardware alarm error code as well
+    public func parseAllTelemetryWithAlarm(_ values: [String]) -> (room: Double, exhaust: Double, target: Double, status: Int, powerLevel: Int, isWood: Bool, errorCode: Int)? {
+        let data = CloudStoveData(deviceKey: nil, isOnline: nil, values: nil, Values: values, data: nil)
+        guard let mapped = data.getMappedValues() else { return nil }
+        return (mapped.room, mapped.exhaust, mapped.target, mapped.status, mapped.powerLevel, mapped.isWood, mapped.errorCode)
+    }
+    
     /// Fetches live stove telemetry from Cloud using official Dielle REST endpoints (/Summary?ids= and /RealTime?id=)
-    func fetchStoveUpdate(deviceKey: String, token: String) async throws -> CloudStoveData? {
+    public func fetchStoveUpdate(deviceKey: String, token: String) async throws -> CloudStoveData? {
         self.activeError = nil
+        let base = self.baseURL
         
-        // Exact endpoints reverse-engineered from official Dielle app (com.ionicframework.dielle389999)
-        let endpoints = [
-            "/Summary?ids=\(deviceKey)",
-            "/RealTime?id=\(deviceKey)",
-            "/Summary?id=\(deviceKey)"
-        ]
-        
-        for ep in endpoints {
-            guard let url = URL(string: "\(baseURL)\(ep)") else { continue }
+        let result = try await Task.detached(priority: .userInitiated) { () -> (data: CloudStoveData?, rawJson: String?) in
+            // Exact endpoints reverse-engineered from official Dielle app (com.ionicframework.dielle389999)
+            let endpoints = [
+                "/Summary?ids=\(deviceKey)",
+                "/RealTime?id=\(deviceKey)",
+                "/Summary?id=\(deviceKey)"
+            ]
             
-            var request = URLRequest(url: url)
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
-            request.timeoutInterval = 8.0
-            
-            do {
-                let (data, response) = try await URLSession.shared.data(for: request)
-                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            for ep in endpoints {
+                guard !Task.isCancelled else { return (nil, nil) }
+                guard let url = URL(string: "\(base)\(ep)") else { continue }
                 
-                if statusCode == 200 {
-                    if let jsonString = String(data: data, encoding: .utf8), jsonString != "[]" && !jsonString.isEmpty {
-                        self.lastCloudResponse = jsonString
-                        
-                        // 1. Direct CloudStoveData decoding
-                        if let decoded = try? JSONDecoder().decode(CloudStoveData.self, from: data), decoded.Values != nil {
-                            return decoded
-                        }
-                        
-                        // 2. Array of CloudStoveData
-                        if let decodedArray = try? JSONDecoder().decode([CloudStoveData].self, from: data),
-                           let first = decodedArray.first, first.Values != nil {
-                            return first
-                        }
-                        
-                        // 3. Manual JSON extraction for LastMessageReceived
-                        if let json = try? JSONSerialization.jsonObject(with: data) {
-                            if let arr = json as? [[String: Any]], let first = arr.first {
-                                if let lmr = first["LastMessageReceived"] as? String,
-                                   let lmrData = lmr.data(using: .utf8),
-                                   let lmrJson = try? JSONSerialization.jsonObject(with: lmrData) as? [String: Any],
-                                   let valArr = lmrJson["Values"] as? [String] {
-                                    return CloudStoveData(deviceKey: deviceKey, isOnline: first["IsOnline"] as? Bool, values: nil, Values: valArr, data: nil)
-                                }
-                                if let valArr = first["Values"] as? [String] {
-                                    return CloudStoveData(deviceKey: deviceKey, isOnline: first["IsOnline"] as? Bool, values: nil, Values: valArr, data: nil)
-                                }
-                            } else if let dict = json as? [String: Any] {
-                                if let valArr = dict["Values"] as? [String] {
-                                    return CloudStoveData(deviceKey: deviceKey, isOnline: dict["IsOnline"] as? Bool, values: nil, Values: valArr, data: nil)
+                var request = URLRequest(url: url)
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+                request.setValue("application/json", forHTTPHeaderField: "Accept")
+                request.timeoutInterval = 4.5
+                
+                do {
+                    let (data, response) = try await URLSession.shared.data(for: request)
+                    guard !Task.isCancelled else { return (nil, nil) }
+                    let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                    
+                    if statusCode == 200 {
+                        if let jsonString = String(data: data, encoding: .utf8), jsonString != "[]" && !jsonString.isEmpty {
+                            // 1. Direct CloudStoveData decoding
+                            if let decoded = try? JSONDecoder().decode(CloudStoveData.self, from: data), decoded.Values != nil {
+                                return (decoded, jsonString)
+                            }
+                            
+                            // 2. Array of CloudStoveData
+                            if let decodedArray = try? JSONDecoder().decode([CloudStoveData].self, from: data),
+                               let first = decodedArray.first, first.Values != nil {
+                                return (first, jsonString)
+                            }
+                            
+                            // 3. Manual JSON extraction for LastMessageReceived
+                            if let json = try? JSONSerialization.jsonObject(with: data) {
+                                if let arr = json as? [[String: Any]], let first = arr.first {
+                                    if let lmr = first["LastMessageReceived"] as? String,
+                                       let lmrData = lmr.data(using: .utf8),
+                                       let lmrJson = try? JSONSerialization.jsonObject(with: lmrData) as? [String: Any],
+                                       let valArr = lmrJson["Values"] as? [String] {
+                                        return (CloudStoveData(deviceKey: deviceKey, isOnline: first["IsOnline"] as? Bool, values: nil, Values: valArr, data: nil), jsonString)
+                                    }
+                                    if let valArr = first["Values"] as? [String] {
+                                        return (CloudStoveData(deviceKey: deviceKey, isOnline: first["IsOnline"] as? Bool, values: nil, Values: valArr, data: nil), jsonString)
+                                    }
+                                } else if let dict = json as? [String: Any] {
+                                    if let valArr = dict["Values"] as? [String] {
+                                        return (CloudStoveData(deviceKey: deviceKey, isOnline: dict["IsOnline"] as? Bool, values: nil, Values: valArr, data: nil), jsonString)
+                                    }
                                 }
                             }
                         }
+                    } else if statusCode == 401 {
+                        continue
                     }
-                } else if statusCode == 401 {
-                    print("DEBUG: Cloud endpoint returned 401 for \(url).")
+                } catch {
                     continue
                 }
-            } catch let err as StoveError {
-                throw err
-            } catch {
-                continue
             }
-        }
+            
+            return (nil, nil)
+        }.value
         
-        return nil
+        if let raw = result.rawJson {
+            self.lastCloudResponse = raw
+        }
+        return result.data
     }
     
     /// Sends a command to the stove via Cloud API (using official Dielle 2ways payload format { "id": "...", "comando": ["2WC", "1", "..."] })
-    func sendCommand(deviceKey: String, token: String, command: StoveCommand) async throws {
+    public func sendCommand(deviceKey: String, token: String, command: StoveCommand) async throws {
         self.activeError = nil
         
         let url = URL(string: "\(baseURL)/command")!

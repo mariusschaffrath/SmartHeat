@@ -38,6 +38,19 @@ struct PelletTankCard: View {
                 
                 Spacer()
                 
+                if pelletManager.isHomeAssistantBacked {
+                    HStack(spacing: 3) {
+                        Image(systemName: "server.rack")
+                        Text("24/7 HA")
+                    }
+                    .font(.system(size: 10, weight: .semibold))
+                    .padding(.vertical, 3)
+                    .padding(.horizontal, 6)
+                    .background(Color.blue.opacity(0.15))
+                    .foregroundColor(.blue)
+                    .clipShape(Capsule())
+                }
+                
                 if pelletManager.isLowPellet {
                     HStack(spacing: 4) {
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -171,8 +184,7 @@ struct PelletTankCard: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity)
-        .background(.thinMaterial)
-        .cornerRadius(24)
+        .liquidGlass(cornerRadius: 24, tint: .orange, tintOpacity: 0.03)
         .sheet(isPresented: $showingAdjustSheet) {
             NavigationView {
                 VStack(spacing: 24) {

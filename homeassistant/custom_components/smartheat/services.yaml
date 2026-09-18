@@ -1,0 +1,7 @@
+refill_bag:
+  name: 1 Sack Pellets nachfüllen
+  description: Erhöht den virtuellen Pellet-Füllstand um einen Sack (15 kg, maximal bis Tankkapazität 20 kg).
+
+refill_full:
+  name: Pellet-Tank voll befüllen
+  description: Setzt den virtuellen Pellet-Füllstand auf die maximale Füllmenge von 20 kg (100%).

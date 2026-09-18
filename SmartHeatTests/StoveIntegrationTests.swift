@@ -168,4 +168,219 @@ final class StoveIntegrationTests: XCTestCase {
             XCTAssertFalse(isWood)
         }
     }
+    func testTemperatureHistoryManagerCalculations() {
+        let manager = TemperatureHistoryManager()
+        let now = Date()
+        let calendar = Calendar.current
+        
+        var roomPoints: [TemperaturePoint] = []
+        // Add 5 points today
+        for i in 0..<5 {
+            let d = calendar.date(byAdding: .hour, value: -i, to: now)!
+            roomPoints.append(TemperaturePoint(date: d, temperature: 20.0 + Double(i))) // 20, 21, 22, 23, 24 -> avg = 22.0
+        }
+        manager.roomTempHistory = roomPoints
+        
+        XCTAssertEqual(manager.todayRoomAvg, 22.0, accuracy: 0.01)
+        XCTAssertEqual(manager.todayRoomMin, 20.0, accuracy: 0.01)
+        XCTAssertEqual(manager.todayRoomMax, 24.0, accuracy: 0.01)
+        
+        var exhaustPoints: [TemperaturePoint] = []
+        exhaustPoints.append(TemperaturePoint(date: now, temperature: 140.0))
+        exhaustPoints.append(TemperaturePoint(date: calendar.date(byAdding: .hour, value: -1, to: now)!, temperature: 180.0))
+        exhaustPoints.append(TemperaturePoint(date: calendar.date(byAdding: .hour, value: -2, to: now)!, temperature: 30.0)) // off
+        manager.exhaustTempHistory = exhaustPoints
+        
+        XCTAssertEqual(manager.exhaustPeakToday, 180.0, accuracy: 0.01)
+        // Active burn average (> 60°C): 140 + 180 = 320 / 2 = 160.0
+        XCTAssertEqual(manager.exhaustOperatingAvg, 160.0, accuracy: 0.01)
+    }
+
+    func testFanChannelSeparationAndCommands() {
+        // Live dump with Kanal 1 (027e) set to 3 and Kanal 2 (0266) set to 1
+        let liveDump = [
+            "1000010000000007160300d704000000028801",
+            "0c81013100010b060501000000b401",
+            "0e027e00030000000600000001027e0007", // Kanal 1 (Flur) = 3
+            "0e02660001000000060000000102660007"  // Kanal 2 = 1
+        ]
+        
+        let data = CloudStoveData(deviceKey: nil, isOnline: true, values: nil, Values: liveDump, data: nil)
+        let mapped = data.getMappedValues()
+        XCTAssertNotNil(mapped)
+        if let mapped = mapped {
+            XCTAssertEqual(mapped.kanal1, 3, "Kanal 1 (Flur) sollte Stufe 3 sein (Register 027e)")
+            XCTAssertEqual(mapped.flurFan, 3, "flurFan sollte mit Kanal 1 übereinstimmen")
+            XCTAssertEqual(mapped.kanal2, 1, "Kanal 2 sollte Stufe 1 sein (Register 0266)")
+        }
+        
+        // Command Formatting
+        let cmdKanal1 = StoveCommand.writeParameter(id: "027e", value: 3)
+        XCTAssertEqual(cmdKanal1.rawString, "050e027e0003", "Kanal 1 Steuerbefehl muss an 027e gehen")
+        
+        let cmdKanal2 = StoveCommand.writeParameter(id: "0266", value: 2)
+        XCTAssertEqual(cmdKanal2.rawString, "050e02660002", "Kanal 2 Steuerbefehl muss an 0266 gehen")
+        
+        // Target temperature 22.0°C = 220 = 0x00dc
+        let cmdTemp = StoveCommand.writeParameter(id: "01ed", value: 220)
+        XCTAssertEqual(cmdTemp.rawString, "050e01ed00dc", "Zieltemperatur 22.0°C (220) muss 050e01ed00dc sein")
+    }
+
+    func testHardwareAlarmDecodingAndUnlockCommand() {
+        // 1. Verify Dielle Sblocco / Unlock Command
+        XCTAssertEqual(StoveCommand.unlock.rawString, "050a0000", "Dielle 2ways Sblocco muss 050a0000 sein")
+        XCTAssertNotEqual(StoveCommand.unlock.rawString, StoveCommand.turnOff.rawString, "Unlock darf nicht identisch mit TurnOff sein")
+        XCTAssertNotEqual(StoveCommand.unlock.rawString, StoveCommand.turnOn.rawString, "Unlock darf keinesfalls identisch mit TurnOn sein!")
+        
+        // 2. Hardware Alarm Mapping
+        let alarmEr03 = DielleHardwareAlarm.from(code: 3)
+        XCTAssertNotNil(alarmEr03)
+        XCTAssertEqual(alarmEr03?.codeString, "Er03")
+        XCTAssertTrue(alarmEr03?.title.contains("Pellets") == true)
+        
+        let alarmEr39 = DielleHardwareAlarm.from(code: 39)
+        XCTAssertNotNil(alarmEr39)
+        XCTAssertEqual(alarmEr39?.codeString, "Er39")
+        XCTAssertTrue(alarmEr39?.title.contains("Unterdruckwächter") == true)
+        
+        XCTAssertNil(DielleHardwareAlarm.from(code: 0), "Code 0 bedeutet kein Fehler")
+        
+        // 3. Block 0 Live Alarm Decoding: status 09 (Blocco) and error 03 (Er03)
+        // Offset 10..12: "09" (Status 9 = Blocco), Offset 12..14: "03" (Error 3 = Er03)
+        let alarmDump = [
+            "1000010000090307160300d704000000028801",
+            "0c81013100010b060501000000b401"
+        ]
+        
+        let data = CloudStoveData(deviceKey: nil, isOnline: true, values: nil, Values: alarmDump, data: nil)
+        let mapped = data.getMappedValues()
+        XCTAssertNotNil(mapped)
+        if let mapped = mapped {
+            XCTAssertEqual(mapped.status, 9, "Status muss 9 (Blocco) sein")
+            XCTAssertEqual(mapped.errorCode, 3, "Fehlercode an Offset 12..14 muss 3 sein")
+            let alarm = DielleHardwareAlarm.from(code: mapped.errorCode)
+            XCTAssertEqual(alarm?.codeString, "Er03")
+        }
+        
+        // 4. Extended Helper parseAllTelemetryWithAlarm
+        let parsed = cloudService.parseAllTelemetryWithAlarm(alarmDump)
+        XCTAssertNotNil(parsed)
+        if let parsed = parsed {
+            XCTAssertEqual(parsed.status, 9)
+            XCTAssertEqual(parsed.errorCode, 3)
+        }
+    }
+
+    func testNotificationManagerForegroundDelegateAndRegistration() {
+        let manager = NotificationManager.shared
+        XCTAssertNotNil(manager)
+        
+        // 1. Check that UNUserNotificationCenter delegate is set to manager
+        XCTAssertNotNil(UNUserNotificationCenter.current().delegate, "Delegate muss registriert sein, damit Vordergrund-Banner erscheinen")
+        XCTAssertTrue(UNUserNotificationCenter.current().delegate === manager, "Manager muss der aktive UNUserNotificationCenter Delegate sein")
+        
+        // 2. Test sendTestNotification dispatch
+        let exp = expectation(description: "sendTestNotification completion")
+        manager.sendTestNotification { success in
+            XCTAssertTrue(success, "Test-Mitteilung sollte erfolgreich bei UNUserNotificationCenter registriert werden")
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 3.0)
+    }
+
+    func testHardwareChronoParsingAndSerialization() {
+        // Construct standard 73-element array returned by ["CCG","0"]
+        // [0]="CCG", [1]="71", [2]="1" (daily mode), followed by 7 days (each 1 day-id + 3 slots * 3 params = 10 elements per day)
+        var responseArray = ["CCG", "71", "1"]
+        for dayId in 1...7 {
+            responseArray.append("\(dayId)")
+            // Slot 1: 06:00 - 08:30 (active)
+            responseArray.append(contentsOf: ["06:00", "08:30", "1"])
+            // Slot 2: 16:30 - 21:30 (active)
+            responseArray.append(contentsOf: ["16:30", "21:30", "1"])
+            // Slot 3: 00:00 - 00:00 (inactive)
+            responseArray.append(contentsOf: ["00:00", "00:00", "0"])
+        }
+        XCTAssertEqual(responseArray.count, 73)
+        
+        let plan = HardwareChronoPlan.parseFromResponse(responseArray)
+        XCTAssertNotNil(plan)
+        guard let plan = plan else { return }
+        
+        XCTAssertEqual(plan.mode, .daily)
+        XCTAssertTrue(plan.isGloballyEnabled)
+        XCTAssertEqual(plan.days.count, 7)
+        
+        let monday = plan.days[0]
+        XCTAssertEqual(monday.name, "Montag")
+        XCTAssertEqual(monday.slots.count, 3)
+        XCTAssertEqual(monday.slots[0].startTime, "06:00")
+        XCTAssertEqual(monday.slots[0].endTime, "08:30")
+        XCTAssertTrue(monday.slots[0].isEnabled)
+        XCTAssertEqual(monday.slots[1].startTime, "16:30")
+        XCTAssertEqual(monday.slots[1].endTime, "21:30")
+        XCTAssertTrue(monday.slots[1].isEnabled)
+        XCTAssertFalse(monday.slots[2].isEnabled)
+        
+        // Serialization Test
+        let ccs = plan.toCCSCommandString()
+        XCTAssertTrue(ccs.hasPrefix("[\"CCS\",\"71\",\"1\","))
+        XCTAssertTrue(ccs.contains("\"06:00\",\"08:30\",\"1\""))
+        XCTAssertTrue(ccs.hasSuffix("]\n"))
+    }
+    
+    func testStoveDiagnosticsCalculations() {
+        // Standard in-between state
+        let diag1 = StoveDiagnostics(totalOperatingHours: 1842, serviceHoursLimit: 2000)
+        XCTAssertEqual(diag1.hoursUntilService, 158)
+        XCTAssertEqual(diag1.serviceProgress, 1842.0 / 2000.0, accuracy: 0.001)
+        XCTAssertTrue(diag1.isServiceImminent)
+        XCTAssertFalse(diag1.isServiceDue)
+        
+        // Fresh stove (0 hours)
+        let diagFresh = StoveDiagnostics(totalOperatingHours: 0, serviceHoursLimit: 2000)
+        XCTAssertEqual(diagFresh.hoursUntilService, 2000)
+        XCTAssertEqual(diagFresh.serviceProgress, 0.0)
+        XCTAssertFalse(diagFresh.isServiceImminent)
+        XCTAssertFalse(diagFresh.isServiceDue)
+        
+        // Due stove (exactly 2000 hours)
+        let diagDue = StoveDiagnostics(totalOperatingHours: 2000, serviceHoursLimit: 2000)
+        XCTAssertEqual(diagDue.hoursUntilService, 0)
+        XCTAssertEqual(diagDue.serviceProgress, 1.0)
+        XCTAssertTrue(diagDue.isServiceImminent)
+        XCTAssertTrue(diagDue.isServiceDue)
+    }
+    
+    func testWoodCombustionTrackerPhasesAndSavings() {
+        let tracker = WoodCombustionTracker()
+        
+        // 1. Initial State: Idle
+        tracker.update(statusCode: 0, exhaustTemp: 20.0)
+        XCTAssertFalse(tracker.isWoodActive)
+        XCTAssertEqual(tracker.currentPhase, .idle)
+        
+        // 2. Status 13 (Legna) triggered with 100°C -> igniting
+        tracker.update(statusCode: 13, exhaustTemp: 100.0)
+        XCTAssertTrue(tracker.isWoodActive)
+        XCTAssertEqual(tracker.currentPhase, .igniting)
+        
+        // 3. Temperature reaches 240°C -> optimal combustion
+        tracker.update(statusCode: 13, exhaustTemp: 240.0)
+        XCTAssertEqual(tracker.currentPhase, .optimal)
+        
+        // 4. Temperature drops to 160°C -> coalsRefillReady (Glutbett)
+        tracker.update(statusCode: 13, exhaustTemp: 160.0)
+        XCTAssertEqual(tracker.currentPhase, .coalsRefillReady)
+        
+        // 5. Temperature drops to 115°C -> burnout
+        tracker.update(statusCode: 13, exhaustTemp: 115.0)
+        XCTAssertEqual(tracker.currentPhase, .burnout)
+        
+        // 6. Return to Pellet / OFF (status 0) -> Session terminates
+        tracker.update(statusCode: 0, exhaustTemp: 40.0)
+        XCTAssertFalse(tracker.isWoodActive)
+        XCTAssertEqual(tracker.currentPhase, .idle)
+    }
 }
+
