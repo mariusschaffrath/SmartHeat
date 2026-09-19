@@ -210,7 +210,8 @@ struct StoveDiagnosticsView: View {
             detailRow(title: "Steuerungs-Platine", value: diagnostics.boardCode)
             detailRow(title: "Firmware-Version", value: diagnostics.firmwareVersion)
             detailRow(title: "Protokoll-Standard", value: "Dielle 2ways (SERVIZI2W)")
-            detailRow(title: "Ofenmodell", value: "Dielle Ghibli Kombi 10 kW")
+            detailRow(title: "Ofenmodell", value: "Dielle Ghibli Hybrid Kombi 10 kW")
+            detailRow(title: "Feuerungssystem", value: "Hybrid-Automatik (Pellet & Holz)")
         }
         .padding(16)
         .liquidGlass(cornerRadius: 22, tint: .clear, tintOpacity: 0.05, specularOpacity: 0.4)

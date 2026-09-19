@@ -30,15 +30,15 @@ public enum WoodCombustionPhase: String, Codable {
     public var statusDescription: String {
         switch self {
         case .idle:
-            return "Scheitholz kann eingelegt werden."
+            return "Bereit für Hybridbetrieb. Scheitholz kann eingelegt werden."
         case .igniting:
-            return "Abgastemperatur steigt rasch an. Kaminzug stabilisiert sich."
+            return "Scheitholzentzündung erkannt. Hybrid-Automatik stoppt Pelletförderung."
         case .optimal:
-            return "Perfekte Verbrennung bei 190°C–320°C. Höchster Wirkungsgrad, null Ruß."
+            return "Optimaler Holzbrand bei 190°C–320°C. Höchster Wirkungsgrad, null Pelletverbrauch."
         case .coalsRefillReady:
-            return "Ideales Glutbett vorhanden! Jetzt neues Holzscheit ohne Neuzündung auflegen."
+            return "Ideales Glutbett vorhanden! Jetzt neues Holzscheit auflegen, um automatischen Pelletstart zu vermeiden."
         case .burnout:
-            return "Glut erlischt. Ofen übernimmt bei weiterem Wärmebedarf automatisch die Pelletzündung."
+            return "Glutbett erlischt. Hybrid-Automatik: Ofen übernimmt bei weiterem Wärmebedarf nahtlos die Pelletzündung."
         }
     }
 }

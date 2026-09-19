@@ -252,7 +252,13 @@ struct HomeDashboardView: View {
                                     .font(.system(size: 13, weight: .bold, design: .rounded))
                                     .foregroundColor(viewModel.operationalState.color)
                                 
-                                if viewModel.operationalState == .on && viewModel.powerLevel > 0 {
+                                if viewModel.isWoodMode {
+                                    Text("•")
+                                        .foregroundColor(.secondary)
+                                    Text("Hybrid (Holz)")
+                                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                                        .foregroundColor(.orange)
+                                } else if viewModel.operationalState == .on && viewModel.powerLevel > 0 {
                                     Text("•")
                                         .foregroundColor(.secondary)
                                     Text("Stufe \(viewModel.powerLevel)")
@@ -853,7 +859,7 @@ struct DashboardView: View {
                 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text("Scheitholzbetrieb")
+                        Text("Hybrid: Scheitholz")
                             .font(.system(size: 16, weight: .bold, design: .rounded))
                             .foregroundColor(.primary)
                         
@@ -865,12 +871,53 @@ struct DashboardView: View {
                             .background(Color.orange.opacity(0.15), in: Capsule())
                     }
                     
-                    Text("Pelletförderung pausiert – 100% Holzverbrennung")
+                    Text("100% Holzfeuerung • Automatische Pellet-Reserve bereit")
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
                 }
                 
                 Spacer()
+            }
+            
+            // Dual-Fuel Pipeline Visualizer
+            HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.orange)
+                    Text("Scheitholz")
+                        .font(.system(size: 11, weight: .bold))
+                    Text("AKTIV")
+                        .font(.system(size: 9, weight: .heavy))
+                        .foregroundColor(.orange)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.18), in: Capsule())
+                }
+                .frame(maxWidth: .infinity)
+                .padding(7)
+                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+                
+                Image(systemName: "arrow.left.and.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.secondary.opacity(0.7))
+                
+                HStack(spacing: 6) {
+                    Image(systemName: "circle.grid.2x2.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.green)
+                    Text("Pellets")
+                        .font(.system(size: 11, weight: .bold))
+                    Text("STANDBY")
+                        .font(.system(size: 9, weight: .heavy))
+                        .foregroundColor(.green)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.green.opacity(0.18), in: Capsule())
+                }
+                .frame(maxWidth: .infinity)
+                .padding(7)
+                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
             }
             
             // Phase indicator badge & text

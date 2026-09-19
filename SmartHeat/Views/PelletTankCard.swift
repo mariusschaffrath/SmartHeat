@@ -120,7 +120,7 @@ struct PelletTankCard: View {
                 if pelletManager.isWoodModeActive {
                     Image(systemName: "leaf.fill")
                         .foregroundColor(.green)
-                    Text("Holzbetrieb aktiv (Pellet-Verbrauch pausiert)")
+                    Text("Hybrid-Scheitholz aktiv • Pelletverbrauch pausiert (0 kg/h)")
                         .font(.caption)
                         .foregroundColor(.green)
                         .fontWeight(.medium)
