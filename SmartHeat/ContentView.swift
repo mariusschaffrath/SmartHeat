@@ -319,6 +319,7 @@ struct DashboardView: View {
     @State private var showingRoomTempDetail = false
     @State private var showingExhaustTempDetail = false
     @State private var showingUnlockConfirmation = false
+    @State private var showingTurnOffConfirmation = false
     
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -696,7 +697,7 @@ struct DashboardView: View {
                         viewModel.turnOn()
                     }
                     ModernActionButton(title: "Ausschalten", icon: "power", color: .red) {
-                        viewModel.turnOff()
+                        showingTurnOffConfirmation = true
                     }
                 }
             }
@@ -720,6 +721,18 @@ struct DashboardView: View {
                 currentExhaustTemp: viewModel.exhaustTemp,
                 stoveStatus: viewModel.stoveStatus
             )
+        }
+        .confirmationDialog(
+            "Pelletofen ausschalten?",
+            isPresented: $showingTurnOffConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Pelletofen ausschalten", role: .destructive) {
+                viewModel.turnOff()
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text("Möchtest du den Pelletofen wirklich ausschalten?\n\nDie Pelletzufuhr stoppt und die Ausbrand- und Abkühlphase (ca. 10–15 Minuten) wird eingeleitet.")
         }
     }
     
