@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 import aiohttp
@@ -87,6 +88,12 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         self.tank_capacity = DEFAULT_TANK_CAPACITY_KG
         self.pellet_level = DEFAULT_TANK_CAPACITY_KG
         self.last_update_time: Optional[datetime] = None
+
+        # Optimistic Confirmation / Pending State (verhindert Zurückspringen alter Werte)
+        self.pending_flur_fan: Optional[int] = None
+        self.pending_flur_fan_time: Optional[float] = None
+        self.pending_target_temp: Optional[float] = None
+        self.pending_target_temp_time: Optional[float] = None
 
     async def _async_query_local_socket(self) -> List[str]:
         """Query stove directly over local TCP socket using Dielle 2WL protocol."""
@@ -379,6 +386,41 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
             round(self.pellet_level / hourly_rate, 1) if hourly_rate > 0 else 999.0
         )
 
+        # Optimistic Confirmation Check for Flur Fan (verhindert Zurückspringen alter Werte)
+        cur_ts = time.time()
+        if self.pending_flur_fan is not None:
+            if fan_flur == self.pending_flur_fan:
+                _LOGGER.info("SYNC: Flur-Gebläse Stufe %s vom Ofen bestätigt!", fan_flur)
+                self.pending_flur_fan = None
+                self.pending_flur_fan_time = None
+            elif self.pending_flur_fan_time and (cur_ts - self.pending_flur_fan_time) < 45.0:
+                _LOGGER.debug(
+                    "SYNC: Halte optimistische Flur-Gebläsestufe %s (Ofen meldet noch %s)",
+                    self.pending_flur_fan,
+                    fan_flur,
+                )
+                fan_flur = self.pending_flur_fan
+            else:
+                self.pending_flur_fan = None
+                self.pending_flur_fan_time = None
+
+        # Optimistic Confirmation Check for Target Temperature
+        if self.pending_target_temp is not None:
+            if abs(target_temp - self.pending_target_temp) < 0.2:
+                _LOGGER.info("SYNC: Zieltemperatur %.1f°C vom Ofen bestätigt!", target_temp)
+                self.pending_target_temp = None
+                self.pending_target_temp_time = None
+            elif self.pending_target_temp_time and (cur_ts - self.pending_target_temp_time) < 45.0:
+                _LOGGER.debug(
+                    "SYNC: Halte optimistische Zieltemperatur %.1f°C (Ofen meldet noch %.1f°C)",
+                    self.pending_target_temp,
+                    target_temp,
+                )
+                target_temp = self.pending_target_temp
+            else:
+                self.pending_target_temp = None
+                self.pending_target_temp_time = None
+
         status_text = STATUS_MAPPINGS.get(status_code, f"Unbekannt ({status_code})")
 
         return {
@@ -401,7 +443,7 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
             "consumption_rate": hourly_rate,
         }
 
-    async def async_send_command(self, cmd_hex: str) -> bool:
+    async def async_send_command(self, cmd_hex: str, skip_immediate_refresh: bool = False) -> bool:
         """Send a 2WC command string via Local TCP socket or Cloud."""
         # 1. Local socket sending
         if self.host:
@@ -432,8 +474,9 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
                     pass
 
                 _LOGGER.info("Local command %s successfully sent to stove", cmd_hex)
-                await asyncio.sleep(1.0)
-                await self.async_request_refresh()
+                if not skip_immediate_refresh:
+                    await asyncio.sleep(1.0)
+                    await self.async_request_refresh()
                 return True
             except Exception as ex:
                 _LOGGER.error("Failed to send local command %s: %s", cmd_hex, ex)
@@ -456,25 +499,53 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
             try:
                 async with self.session.post(url, json=body, headers=headers, timeout=10) as resp:
                     if resp.status == 200:
-                        await asyncio.sleep(1.0)
-                        await self.async_request_refresh()
+                        if not skip_immediate_refresh:
+                            await asyncio.sleep(1.0)
+                            await self.async_request_refresh()
                         return True
             except Exception as ex:
                 _LOGGER.error("Failed to send cloud command %s: %s", cmd_hex, ex)
 
         return False
 
+    async def async_send_command_with_burst(self, cmd_hex: str) -> bool:
+        """Send command and run burst verification polls (1.5s, 3.5s, 6.0s) like in iOS App."""
+        success = await self.async_send_command(cmd_hex, skip_immediate_refresh=True)
+        if success:
+            async def _burst():
+                delays = [1.5, 2.0, 2.5]
+                for delay in delays:
+                    await asyncio.sleep(delay)
+                    await self.async_request_refresh()
+                    if self.pending_flur_fan is None and self.pending_target_temp is None:
+                        break
+            asyncio.create_task(_burst())
+        return success
+
     async def async_set_target_temperature(self, temp: float) -> bool:
-        """Set target thermostat temperature (hex: 050e01ed + 4-digit hex temp*10)."""
-        raw_val = int(round(temp * 10.0))
+        """Set target thermostat temperature with optimistic lock and burst verification."""
+        clamped = max(10.0, min(35.0, temp))
+        self.pending_target_temp = clamped
+        self.pending_target_temp_time = time.time()
+        if self.data:
+            self.data["target_temperature"] = clamped
+            self.async_update_listeners()
+
+        raw_val = int(round(clamped * 10.0))
         cmd = f"{CMD_SET_TEMP_PREFIX}{raw_val:04x}"
-        return await self.async_send_command(cmd)
+        return await self.async_send_command_with_burst(cmd)
 
     async def async_set_flur_fan(self, speed: int) -> bool:
-        """Set Flur Luftheizung fan speed (0=Aus, 1..6=P1..P6, 7=Auto)."""
+        """Set Flur Luftheizung fan speed (0=Aus, 1..6=P1..P6, 7=Auto) with optimistic lock and burst verification."""
         speed_clamped = max(0, min(7, speed))
+        self.pending_flur_fan = speed_clamped
+        self.pending_flur_fan_time = time.time()
+        if self.data:
+            self.data["fan_flur"] = speed_clamped
+            self.async_update_listeners()
+
         cmd = f"{CMD_SET_FAN_FLUR_PREFIX}{speed_clamped:04x}"
-        return await self.async_send_command(cmd)
+        return await self.async_send_command_with_burst(cmd)
 
     async def async_set_luftzufuhr1_fan(self, speed: int) -> bool:
         """Set Luftzufuhr 1 (Brennraum / 0266) fan speed (0=Aus, 1..5=P1..P5, 6=Auto)."""
