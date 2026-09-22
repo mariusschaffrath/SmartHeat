@@ -612,11 +612,11 @@ struct DashboardView: View {
                                         .font(.system(size: 15, weight: .bold, design: .rounded))
                                         .foregroundColor(.secondary)
                                 } else if viewModel.isHeating {
-                                    Text("Kanalgebläse aktiv • Stufe \(speedText)")
+                                    Text("Luftheizung aktiv • Stufe \(speedText)")
                                         .font(.system(size: 16, weight: .bold, design: .rounded))
                                         .foregroundColor(.primary)
                                 } else {
-                                    Text("Kanalgebläse Stufe \(speedText)")
+                                    Text("Luftheizung Stufe \(speedText)")
                                         .font(.system(size: 15, weight: .bold, design: .rounded))
                                         .foregroundColor(.secondary)
                                 }

@@ -153,15 +153,15 @@ public struct SetFlurFanSpeedIntent: AppIntent {
         }
         
         let speedVal = speed.rawValue
-        // Kanal 1 (Flur) ist Register 027e
-        let cmd = StoveCommand.writeParameter(id: "027e", value: speedVal)
+        // Luftheizung Flur ist Register 023f
+        let cmd = StoveCommand.writeParameter(id: "023f", value: speedVal)
         
         do {
             try await CloudService.shared.sendCommand(deviceKey: deviceKey, token: token, command: cmd)
-            let speedLabel = speedVal == 0 ? "Aus" : (speedVal == 6 ? "Auto" : "Stufe \(speedVal)")
+            let speedLabel = speedVal == 0 ? "Aus" : (speedVal >= 6 ? "Auto" : "Stufe \(speedVal)")
             return .result(dialog: "Das Gebläse im Flur steht jetzt auf \(speedLabel).")
         } catch {
-            return .result(dialog: "Kanalgebläse konnte nicht verstellt werden: \(error.localizedDescription)")
+            return .result(dialog: "Gebläse im Flur konnte nicht verstellt werden: \(error.localizedDescription)")
         }
     }
 }

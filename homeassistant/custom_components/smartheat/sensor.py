@@ -74,14 +74,21 @@ SENSOR_DESCRIPTIONS: tuple[SmartHeatSensorEntityDescription, ...] = (
     ),
     SmartHeatSensorEntityDescription(
         key="fan_flur",
-        name="Gebläse Flur (Kanal 1)",
+        name="Gebläse Flur (Luftheizung)",
         object_id="geblase_flur_kanal_1",
         icon="mdi:fan",
         value_fn=lambda d: d.get("fan_flur"),
     ),
     SmartHeatSensorEntityDescription(
+        key="fan_luftzufuhr1",
+        name="Gebläse Luftzufuhr 1",
+        object_id="geblase_luftzufuhr_1",
+        icon="mdi:fan",
+        value_fn=lambda d: d.get("fan_luftzufuhr1"),
+    ),
+    SmartHeatSensorEntityDescription(
         key="fan_kanal2",
-        name="Gebläse Kanal 2",
+        name="Gebläse Luftzufuhr 2",
         object_id="geblase_kanal_2",
         icon="mdi:fan",
         value_fn=lambda d: d.get("fan_kanal2"),

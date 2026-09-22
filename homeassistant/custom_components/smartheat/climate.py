@@ -29,9 +29,19 @@ FAN_MODE_MAPPINGS = {
     "Stufe 3": 3,
     "Stufe 4": 4,
     "Stufe 5": 5,
-    "Auto": 6,
+    "Stufe 6": 6,
+    "Auto": 7,
 }
-REVERSE_FAN_MAPPINGS = {v: k for k, v in FAN_MODE_MAPPINGS.items()}
+REVERSE_FAN_MAPPINGS = {
+    0: "Aus",
+    1: "Stufe 1",
+    2: "Stufe 2",
+    3: "Stufe 3",
+    4: "Stufe 4",
+    5: "Stufe 5",
+    6: "Stufe 6",
+    7: "Auto",
+}
 
 
 async def async_setup_entry(

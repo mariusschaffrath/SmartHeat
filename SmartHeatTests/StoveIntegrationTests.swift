@@ -197,29 +197,29 @@ final class StoveIntegrationTests: XCTestCase {
     }
 
     func testFanChannelSeparationAndCommands() {
-        // Live dump with Kanal 1 (027e) set to 3 and Kanal 2 (0266) set to 1
+        // Live dump with Luftheizung Flur (023f) set to 2 and Luftzufuhr 2 (027e) set to 1
         let liveDump = [
             "1000010000000007160300d704000000028801",
             "0c81013100010b060501000000b401",
-            "0e027e00030000000600000001027e0007", // Kanal 1 (Flur) = 3
-            "0e02660001000000060000000102660007"  // Kanal 2 = 1
+            "0e023f00020000000600000001023f0007", // Luftheizung Flur (023f) = 2
+            "0e027e00010000000600000001027e0007"  // Luftzufuhr 2 (027e) = 1
         ]
         
         let data = CloudStoveData(deviceKey: nil, isOnline: true, values: nil, Values: liveDump, data: nil)
         let mapped = data.getMappedValues()
         XCTAssertNotNil(mapped)
         if let mapped = mapped {
-            XCTAssertEqual(mapped.kanal1, 3, "Kanal 1 (Flur) sollte Stufe 3 sein (Register 027e)")
-            XCTAssertEqual(mapped.flurFan, 3, "flurFan sollte mit Kanal 1 übereinstimmen")
-            XCTAssertEqual(mapped.kanal2, 1, "Kanal 2 sollte Stufe 1 sein (Register 0266)")
+            XCTAssertEqual(mapped.kanal1, 2, "Luftheizung (Flur) sollte Stufe 2 sein (Register 023f)")
+            XCTAssertEqual(mapped.flurFan, 2, "flurFan sollte mit Luftheizung übereinstimmen")
+            XCTAssertEqual(mapped.kanal2, 1, "Luftzufuhr 2 sollte Stufe 1 sein (Register 027e)")
         }
         
         // Command Formatting
-        let cmdKanal1 = StoveCommand.writeParameter(id: "027e", value: 3)
-        XCTAssertEqual(cmdKanal1.rawString, "050e027e0003", "Kanal 1 Steuerbefehl muss an 027e gehen")
+        let cmdFlur = StoveCommand.writeParameter(id: "023f", value: 2)
+        XCTAssertEqual(cmdFlur.rawString, "050e023f0002", "Luftheizung Flur Steuerbefehl muss an 023f gehen")
         
-        let cmdKanal2 = StoveCommand.writeParameter(id: "0266", value: 2)
-        XCTAssertEqual(cmdKanal2.rawString, "050e02660002", "Kanal 2 Steuerbefehl muss an 0266 gehen")
+        let cmdKanal2 = StoveCommand.writeParameter(id: "027e", value: 2)
+        XCTAssertEqual(cmdKanal2.rawString, "050e027e0002", "Luftzufuhr 2 Steuerbefehl muss an 027e gehen")
         
         // Target temperature 22.0°C = 220 = 0x00dc
         let cmdTemp = StoveCommand.writeParameter(id: "01ed", value: 220)

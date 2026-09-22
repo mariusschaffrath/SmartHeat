@@ -28,6 +28,7 @@ from .const import (
     CMD_TURN_OFF,
     CMD_SET_TEMP_PREFIX,
     CMD_SET_FAN_FLUR_PREFIX,
+    CMD_SET_FAN_KANAL1_PREFIX,
     CMD_SET_FAN_KANAL2_PREFIX,
     CMD_SET_POWER_PREFIX,
 )
@@ -227,6 +228,8 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         error_code = 0
         power_level = 1
         fan_flur = 1
+        fan_luftzufuhr1 = 1
+        fan_luftzufuhr2 = 1
         fan_kanal2 = 1
         is_wood = False
 
@@ -342,11 +345,14 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
                         target_temp = round(float(raw_val) * mult, 1)
                     elif param_id == "016c" and 1 <= raw_val <= 6:
                         power_level = raw_val
-                    elif param_id == "027e":  # Kanal 1 (Flur / P1)
+                    elif param_id == "023f":  # Luftheizung Flur (Riscaldamento / Heating Fan)
                         fan_flur = raw_val
-                    elif param_id == "0266":  # Kanal 2 (P2)
+                    elif param_id == "0266":  # Luftzufuhr 1 (Brennraum / Canalizzata 1)
+                        fan_luftzufuhr1 = raw_val
+                    elif param_id == "027e":  # Luftzufuhr 2 (Brennraum / Canalizzata 2)
+                        fan_luftzufuhr2 = raw_val
                         fan_kanal2 = raw_val
-                    elif param_id == "017d" and fan_flur == 1 and fan_kanal2 == 1:
+                    elif param_id == "017d" and fan_flur == 1:
                         fan_flur = raw_val
 
         # Power adjustment during modulation
@@ -386,6 +392,8 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
             "power_level": power_level,
             "fan_flur": fan_flur,
             "fan_kanal2": fan_kanal2,
+            "fan_luftzufuhr1": fan_luftzufuhr1,
+            "fan_luftzufuhr2": fan_luftzufuhr2,
             "is_wood_mode": is_wood,
             "pellet_level_kg": round(self.pellet_level, 2),
             "pellet_percent": pellet_percent,
@@ -463,13 +471,19 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         return await self.async_send_command(cmd)
 
     async def async_set_flur_fan(self, speed: int) -> bool:
-        """Set Flur ducted fan (Kanal 1) speed (0=Aus, 1..5=P1..P5, 6=Auto)."""
-        speed_clamped = max(0, min(6, speed))
+        """Set Flur Luftheizung fan speed (0=Aus, 1..6=P1..P6, 7=Auto)."""
+        speed_clamped = max(0, min(7, speed))
         cmd = f"{CMD_SET_FAN_FLUR_PREFIX}{speed_clamped:04x}"
         return await self.async_send_command(cmd)
 
+    async def async_set_luftzufuhr1_fan(self, speed: int) -> bool:
+        """Set Luftzufuhr 1 (Brennraum / 0266) fan speed (0=Aus, 1..5=P1..P5, 6=Auto)."""
+        speed_clamped = max(0, min(6, speed))
+        cmd = f"{CMD_SET_FAN_KANAL1_PREFIX}{speed_clamped:04x}"
+        return await self.async_send_command(cmd)
+
     async def async_set_kanal2_fan(self, speed: int) -> bool:
-        """Set Kanal 2 fan speed (0=Aus, 1..5=P1..P5, 6=Auto)."""
+        """Set Luftzufuhr 2 (Brennraum / 027e) fan speed (0=Aus, 1..5=P1..P5, 6=Auto)."""
         speed_clamped = max(0, min(6, speed))
         cmd = f"{CMD_SET_FAN_KANAL2_PREFIX}{speed_clamped:04x}"
         return await self.async_send_command(cmd)

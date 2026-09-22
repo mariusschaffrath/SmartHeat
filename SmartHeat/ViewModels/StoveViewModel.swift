@@ -554,7 +554,7 @@ class StoveViewModel: ObservableObject {
     
     func setKanalFanSpeed(channel: Int, speed: Int) {
         triggerInteractionLock()
-        let clamped = max(0, min(6, speed))
+        let clamped = max(0, min(7, speed))
         
         if syncFanChannels {
             self.kanal1FanSpeed = clamped
@@ -563,21 +563,21 @@ class StoveViewModel: ObservableObject {
             self.pendingKanal1Time = Date()
             UserDefaults.standard.set(clamped, forKey: "saved_kanal1_speed")
             UserDefaults.standard.set(clamped, forKey: "saved_kanal2_speed")
-            sendUniversalWithBurst(command: StoveCommand.writeParameter(id: "027e", value: clamped))
-            sendUniversal(command: StoveCommand.writeParameter(id: "0266", value: clamped))
+            sendUniversalWithBurst(command: StoveCommand.writeParameter(id: "023f", value: clamped))
+            sendUniversal(command: StoveCommand.writeParameter(id: "027e", value: clamped))
         } else {
             if channel == 1 {
-                // Kanal 1 (Flur P1) ist Register 027e
+                // Luftheizung Flur (Riscaldamento) ist Register 023f
                 self.kanal1FanSpeed = clamped
                 self.pendingKanal1Speed = clamped
                 self.pendingKanal1Time = Date()
                 UserDefaults.standard.set(clamped, forKey: "saved_kanal1_speed")
-                sendUniversalWithBurst(command: StoveCommand.writeParameter(id: "027e", value: clamped))
+                sendUniversalWithBurst(command: StoveCommand.writeParameter(id: "023f", value: clamped))
             } else {
-                // Kanal 2 (P2) ist Register 0266
+                // Zusatzkanal / Luftzufuhr ist Register 027e
                 self.kanal2FanSpeed = clamped
                 UserDefaults.standard.set(clamped, forKey: "saved_kanal2_speed")
-                sendUniversal(command: StoveCommand.writeParameter(id: "0266", value: clamped))
+                sendUniversal(command: StoveCommand.writeParameter(id: "027e", value: clamped))
             }
         }
     }

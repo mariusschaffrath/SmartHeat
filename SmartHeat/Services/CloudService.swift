@@ -196,13 +196,16 @@ public struct CloudStoveData: Codable {
                         if status == 13 {
                             isWood = true
                         }
-                    case "027e": // Kanal 1 / Canalizzazione 1 (Flur - P1)
+                    case "023f": // Luftheizung Flur (Riscaldamento / Heating Fan)
                         kanal1 = rawVal
                         flurFan = rawVal
-                    case "0266": // Kanal 2 / Canalizzazione 2 (P2)
+                    case "0266": // Luftzufuhr 1 (Brennraum / Canalizzata 1)
+                        // Primäre Brennraumluft
+                        break
+                    case "027e": // Luftzufuhr 2 (Brennraum / Canalizzata 2)
                         kanal2 = rawVal
                     case "017d": // Ducted fan single fallback
-                        if kanal1 == 1 && kanal2 == 1 {
+                        if flurFan == 1 && kanal2 == 1 {
                             flurFan = rawVal
                         }
                     default: break
