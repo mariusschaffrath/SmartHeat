@@ -152,3 +152,21 @@ class SmartHeatClimate(CoordinatorEntity[SmartHeatCoordinator], ClimateEntity):
         if fan_mode in FAN_MODE_MAPPINGS:
             speed = FAN_MODE_MAPPINGS[fan_mode]
             await self.coordinator.async_set_flur_fan(speed)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return climate entity attributes."""
+        if not self.coordinator.data:
+            return None
+        data = self.coordinator.data
+        return {
+            "power_level_setpoint": data.get("power_level"),
+            "effective_power_level": data.get("effective_power_level"),
+            "effective_power_display": data.get("effective_power_display"),
+            "status_text": data.get("status_text"),
+            "exhaust_temperature": data.get("exhaust_temperature"),
+            "fan_flur": data.get("fan_flur"),
+            "fan_luftzufuhr1": data.get("fan_luftzufuhr1"),
+            "fan_luftzufuhr2": data.get("fan_luftzufuhr2"),
+            "consumption_rate": data.get("consumption_rate"),
+        }

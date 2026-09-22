@@ -362,15 +362,56 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
                     elif param_id == "017d" and fan_flur == 1:
                         fan_flur = raw_val
 
-        # Power adjustment during modulation
-        if status_code == 6:
-            power_level = 1
+        # Determine Soll-Leistungsstufe and Ist-Leistungsstufe (Effective Modulation Level)
+        soll_power = power_level  # 1..5 or 6 (Auto)
+        is_auto_mode = (soll_power == 6)
+        delta_temp = round(max(0.0, target_temp - room_temp), 1)
+
+        if status_code in (0, 7, 8, 9, 11, 12) or is_wood:
+            effective_power = 0
+            effective_display = "Aus" if status_code == 0 else STATUS_MAPPINGS.get(status_code, "Inaktiv")
+        elif status_code in (1, 2, 3, 4, 10):
+            effective_power = 1
+            effective_display = "Zündung (Startphase)"
+        elif status_code == 6:  # Modulation (Soll-Temp erreicht, Minimalleistung)
+            effective_power = 1
+            effective_display = "Stufe 1 (Modulation)"
+        elif status_code == 5:  # Heizbetrieb
+            if not is_auto_mode and 1 <= soll_power <= 5:
+                effective_power = soll_power
+                effective_display = f"Stufe {soll_power} (Manuell)"
+            else:
+                # Auto-Modus:
+                # 1. Prüfe hardwareseitige Verbrennungsluft-Rückmeldung (Gebläse 1 und 2)
+                comb_fan = max(fan_luftzufuhr1, fan_luftzufuhr2)
+                if 1 < comb_fan <= 5:
+                    effective_power = comb_fan
+                    effective_display = f"Stufe {comb_fan} (Auto / Gebläse)"
+                else:
+                    # 2. TiEmme thermische Modulationskurve nach Delta T
+                    if delta_temp >= 2.0:
+                        effective_power = 5
+                        effective_display = f"Stufe 5 (Auto / ΔT +{delta_temp}°C)"
+                    elif delta_temp >= 1.5:
+                        effective_power = 4
+                        effective_display = f"Stufe 4 (Auto / ΔT +{delta_temp}°C)"
+                    elif delta_temp >= 1.0:
+                        effective_power = 3
+                        effective_display = f"Stufe 3 (Auto / ΔT +{delta_temp}°C)"
+                    elif delta_temp >= 0.5:
+                        effective_power = 2
+                        effective_display = f"Stufe 2 (Auto / ΔT +{delta_temp}°C)"
+                    else:
+                        effective_power = 1
+                        effective_display = f"Stufe 1 (Auto / ΔT +{delta_temp}°C)"
+        else:
+            effective_power = 1
+            effective_display = f"Stufe 1 ({STATUS_MAPPINGS.get(status_code, 'Betrieb')})"
 
         # Pellet consumption tracking
         now = datetime.now(timezone.utc)
         hourly_rate = 0.0
-        if not is_wood and status_code in (1, 2, 3, 4, 5, 6):
-            effective_power = 1 if status_code == 6 else (1 if power_level == 6 else power_level)
+        if not is_wood and status_code in (1, 2, 3, 4, 5, 6) and effective_power > 0:
             hourly_rate = CONSUMPTION_RATES.get(effective_power, 0.65)
 
             if self.last_update_time:
@@ -428,10 +469,13 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
             "room_temperature": room_temp,
             "exhaust_temperature": exhaust_temp,
             "target_temperature": target_temp,
+            "delta_temp": delta_temp,
             "status_code": status_code,
             "status_text": status_text,
             "error_code": error_code,
             "power_level": power_level,
+            "effective_power_level": effective_power,
+            "effective_power_display": effective_display,
             "fan_flur": fan_flur,
             "fan_kanal2": fan_kanal2,
             "fan_luftzufuhr1": fan_luftzufuhr1,

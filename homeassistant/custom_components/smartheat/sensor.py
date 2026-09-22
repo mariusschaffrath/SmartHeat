@@ -122,6 +122,22 @@ SENSOR_DESCRIPTIONS: tuple[SmartHeatSensorEntityDescription, ...] = (
         value_fn=lambda d: d.get("pellet_remaining_hours"),
     ),
     SmartHeatSensorEntityDescription(
+        key="effective_power_display",
+        name="Aktuelle Ist-Leistung",
+        object_id="aktuelle_istleistung",
+        icon="mdi:fire-circle",
+        value_fn=lambda d: d.get("effective_power_display"),
+    ),
+    SmartHeatSensorEntityDescription(
+        key="consumption_rate",
+        name="Pellet-Verbrauch stündlich",
+        object_id="pellet_verbrauch_stundlich",
+        native_unit_of_measurement="kg/h",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:fire-alert",
+        value_fn=lambda d: d.get("consumption_rate"),
+    ),
+    SmartHeatSensorEntityDescription(
         key="is_wood_mode",
         name="Scheitholzbetrieb",
         object_id="scheitholzbetrieb",
@@ -172,6 +188,32 @@ class SmartHeatSensor(CoordinatorEntity[SmartHeatCoordinator], SensorEntity):
         if not self.coordinator.data:
             return None
         return self.entity_description.value_fn(self.coordinator.data)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return entity specific state attributes."""
+        if not self.coordinator.data:
+            return None
+        data = self.coordinator.data
+        if self.entity_description.key == "power_level":
+            return {
+                "soll_stufe": data.get("power_level"),
+                "ist_stufe": data.get("effective_power_level"),
+                "ist_leistung_display": data.get("effective_power_display"),
+                "is_auto": data.get("power_level") == 6,
+                "modulation_aktiv": data.get("status_code") == 6,
+                "verbrauch_kgh": data.get("consumption_rate"),
+                "delta_t": data.get("delta_temp"),
+            }
+        elif self.entity_description.key == "effective_power_display":
+            return {
+                "soll_stufe": data.get("power_level"),
+                "ist_stufe": data.get("effective_power_level"),
+                "verbrauch_kgh": data.get("consumption_rate"),
+                "delta_t": data.get("delta_temp"),
+                "geblase_brennraum_max": max(data.get("fan_luftzufuhr1", 1), data.get("fan_luftzufuhr2", 1)),
+            }
+        return None
 
     @property
     def device_info(self) -> DeviceInfo:

@@ -261,7 +261,7 @@ struct HomeDashboardView: View {
                                 } else if viewModel.operationalState == .on && viewModel.powerLevel > 0 {
                                     Text("•")
                                         .foregroundColor(.secondary)
-                                    Text("Stufe \(viewModel.powerLevel)")
+                                    Text(viewModel.isAutoPower ? "Auto (P\(viewModel.effectivePowerLevel))" : "Stufe \(viewModel.powerLevel)")
                                         .font(.system(size: 13, weight: .bold, design: .rounded))
                                         .foregroundColor(.orange)
                                 }
@@ -538,7 +538,7 @@ struct DashboardView: View {
                             .tracking(1.1)
                             .foregroundColor(.secondary)
                         
-                        Text(viewModel.operationalState == .on ? "Stufe \(viewModel.powerLevel)" : viewModel.operationalState.title)
+                        Text(viewModel.operationalState == .on ? (viewModel.isAutoPower ? "Auto (Stufe \(viewModel.effectivePowerLevel))" : "Stufe \(viewModel.powerLevel)") : viewModel.operationalState.title)
                             .font(.system(size: 17, weight: .bold, design: .rounded))
                             .foregroundColor(.primary)
                     }
@@ -548,7 +548,8 @@ struct DashboardView: View {
                     // 5 Beleuchtete Liquid Glass Vials (P1 - P5)
                     HStack(spacing: 6) {
                         ForEach(1...5, id: \.self) { level in
-                            let isActive = level <= viewModel.powerLevel && viewModel.isHeating
+                            let activeLevel = viewModel.isAutoPower ? viewModel.effectivePowerLevel : viewModel.powerLevel
+                            let isActive = level <= activeLevel && viewModel.isHeating
                             RoundedRectangle(cornerRadius: 4, style: .continuous)
                                 .fill(
                                     isActive ?

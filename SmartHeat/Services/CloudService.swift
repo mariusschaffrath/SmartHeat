@@ -52,7 +52,7 @@ public struct CloudStoveData: Codable {
     }
     
     /// Parses 2ways / syevo hex array matching official Dielle SERVIZI2W logic
-    public func getMappedValues() -> (room: Double, exhaust: Double, target: Double, water: Double, pressure: Double, status: Int, powerLevel: Int, flurFan: Int, kanal1: Int, kanal2: Int, isWood: Bool, errorCode: Int)? {
+    public func getMappedValues() -> (room: Double, exhaust: Double, target: Double, water: Double, pressure: Double, status: Int, powerLevel: Int, effectivePower: Int, flurFan: Int, kanal1: Int, kanal2: Int, isWood: Bool, errorCode: Int)? {
         guard let array = Values, !array.isEmpty else { return nil }
         
         var room: Double = 0
@@ -65,6 +65,7 @@ public struct CloudStoveData: Codable {
         var flurFan: Int = 1
         var kanal1: Int = 1
         var kanal2: Int = 1
+        var combustionFan1: Int = 1
         var isWood: Bool = false
         var errorCode: Int = 0
         
@@ -96,9 +97,9 @@ public struct CloudStoveData: Codable {
                     }
                 }
                 
-                // Room / Main Temp at offset 20..24 (signed Int16)
+                // Room Temp at offset 20..24
                 if let tpRaw = extractSignedInt16(from: block, start: 20) {
-                    if tpRaw != -127 && tpRaw > 0 {
+                    if tpRaw > 0 && tpRaw != -127 {
                         room = Double(tpRaw) * multTemp
                     }
                 }
@@ -124,7 +125,7 @@ public struct CloudStoveData: Codable {
                         powerLevel = pwr
                     } else if pwr == 6 {
                         // Auto modulation
-                        powerLevel = (status == 6) ? 1 : 6
+                        powerLevel = 6
                     }
                 }
                 
@@ -197,11 +198,10 @@ public struct CloudStoveData: Codable {
                             isWood = true
                         }
                     case "023f": // Luftheizung Flur (Riscaldamento / Heating Fan)
-                        kanal1 = rawVal
                         flurFan = rawVal
+                        kanal1 = rawVal
                     case "0266": // Luftzufuhr 1 (Brennraum / Canalizzata 1)
-                        // Primäre Brennraumluft
-                        break
+                        combustionFan1 = rawVal
                     case "027e": // Luftzufuhr 2 (Brennraum / Canalizzata 2)
                         kanal2 = rawVal
                     case "017d": // Ducted fan single fallback
@@ -214,12 +214,40 @@ public struct CloudStoveData: Codable {
             }
         }
         
-        if status == 6 {
-            // Modulation is lowest burn level
-            powerLevel = 1
+        // Calculate effective physical power level (1..5)
+        var effectivePower: Int = 1
+        if status == 0 || status == 7 || status == 8 || status == 9 || status == 11 || status == 12 || isWood {
+            effectivePower = 0
+        } else if status == 6 {
+            // Modulation: always minimum power P1
+            effectivePower = 1
+        } else if status == 5 {
+            if powerLevel >= 1 && powerLevel <= 5 {
+                effectivePower = powerLevel
+            } else if powerLevel == 6 { // Auto mode
+                // 1. Check live combustion fan speed telemetry (canalizzata 1 & 2)
+                let combFan = max(combustionFan1, kanal2)
+                if combFan > 1 && combFan <= 5 {
+                    effectivePower = combFan
+                } else {
+                    // 2. TiEmme thermal delta curve (Target - Room)
+                    let delta = max(0.0, target - room)
+                    if delta >= 2.0 {
+                        effectivePower = 5
+                    } else if delta >= 1.5 {
+                        effectivePower = 4
+                    } else if delta >= 1.0 {
+                        effectivePower = 3
+                    } else if delta >= 0.5 {
+                        effectivePower = 2
+                    } else {
+                        effectivePower = 1
+                    }
+                }
+            }
         }
         
-        return (room, exhaust, target, water, pressure, status, powerLevel, flurFan, kanal1, kanal2, isWood, errorCode)
+        return (room, exhaust, target, water, pressure, status, powerLevel, effectivePower, flurFan, kanal1, kanal2, isWood, errorCode)
     }
     
     private func extractSignedInt16(from hex: String, start: Int) -> Int? {

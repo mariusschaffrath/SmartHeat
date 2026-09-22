@@ -67,6 +67,9 @@ class StoveViewModel: ObservableObject {
     @Published var exhaustTemp: Double = 0.0
     @Published var waterPressure: Double = 0.0
     @Published var powerLevel: Int = 3
+    @Published var effectivePowerLevel: Int = 3
+    @Published var isAutoPower: Bool = false
+    @Published var effectivePowerDisplay: String = "Stufe 3"
     @Published var kanal1FanSpeed: Int = UserDefaults.standard.integer(forKey: "saved_kanal1_speed") != 0 ? UserDefaults.standard.integer(forKey: "saved_kanal1_speed") : 1
     @Published var kanal2FanSpeed: Int = UserDefaults.standard.integer(forKey: "saved_kanal2_speed") != 0 ? UserDefaults.standard.integer(forKey: "saved_kanal2_speed") : 1
     @Published var selectedFanChannel: Int = 1 // 1 = Kanal 1 (Flur), 2 = Kanal 2
@@ -346,7 +349,18 @@ class StoveViewModel: ObservableObject {
                         
                         self.waterTemp = mapped.water
                         self.waterPressure = mapped.pressure
-                        self.powerLevel = max(1, min(5, mapped.powerLevel))
+                        self.powerLevel = mapped.powerLevel
+                        self.effectivePowerLevel = mapped.effectivePower
+                        self.isAutoPower = (mapped.powerLevel == 6)
+                        if mapped.status == 0 {
+                            self.effectivePowerDisplay = "Aus"
+                        } else if mapped.status == 6 {
+                            self.effectivePowerDisplay = "Stufe 1 (Modulation)"
+                        } else if self.isAutoPower {
+                            self.effectivePowerDisplay = "Auto (Stufe \(mapped.effectivePower))"
+                        } else {
+                            self.effectivePowerDisplay = "Stufe \(mapped.powerLevel)"
+                        }
                         
                         // Optimistic Confirmation Check for Kanal 1 Fan Speed
                         if let pendingFan = self.pendingKanal1Speed {
@@ -403,7 +417,7 @@ class StoveViewModel: ObservableObject {
                         }
                         
                         if self.isPelletTankEnabled {
-                            self.pelletManager.updateTracking(statusCode: mapped.status, powerLevel: mapped.powerLevel, isWood: mapped.isWood)
+                            self.pelletManager.updateTracking(statusCode: mapped.status, powerLevel: mapped.effectivePower, isWood: mapped.isWood)
                         }
                         self.woodTracker.update(statusCode: mapped.status, exhaustTemp: mapped.exhaust)
                         self.lastRawMessage = "Cloud Live-Daten empfangen."

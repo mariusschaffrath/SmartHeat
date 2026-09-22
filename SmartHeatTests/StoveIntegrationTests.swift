@@ -382,5 +382,53 @@ final class StoveIntegrationTests: XCTestCase {
         XCTAssertFalse(tracker.isWoodActive)
         XCTAssertEqual(tracker.currentPhase, .idle)
     }
+    
+    func testAutoPowerModulationAndFanSpeedDeduction() {
+        // Case 1: Status 5 (Betrieb), Power Setpoint 6 (Auto), Combustion Fan 2 at Stufe 4
+        let dumpFan4 = [
+            "1000010000050007160300d704000000028801", // status 05 (Heizbetrieb)
+            "0c81013100010b060501000000b401",
+            "0e016c00060001000600000001016c0007", // 016c = 6 (Auto)
+            "0e023f00020000000600000001023f0007", // Flur fan = 2
+            "0e02660001000000060000000102660007", // Luftzufuhr 1 = 1
+            "0e027e00040000000600000001027e0007"  // Luftzufuhr 2 = 4 (Gebläse aktiv auf Stufe 4!)
+        ]
+        let dataFan4 = CloudStoveData(deviceKey: nil, isOnline: true, values: nil, Values: dumpFan4, data: nil)
+        let mappedFan4 = dataFan4.getMappedValues()
+        XCTAssertNotNil(mappedFan4)
+        if let mapped = mappedFan4 {
+            XCTAssertEqual(mapped.powerLevel, 6, "Sollwert-Register muss 6 (Auto) bleiben")
+            XCTAssertEqual(mapped.effectivePower, 4, "Ist-Leistungsstufe muss über aktives Gebläse 4 erkannt werden")
+        }
+        
+        // Case 2: Status 5 (Betrieb), Power Setpoint 6 (Auto), Fans at 1, Room 19.0°C, Target 22.0°C (Delta = 3.0°C -> P5)
+        let dumpDeltaHigh = [
+            "1000010000050007160300be04000000028801", // Room 19.0°C (0x00be = 190)
+            "0c81013100010b060501000000dc01",         // Target 22.0°C (0x00dc = 220)
+            "0e016c00060001000600000001016c0007",     // Auto
+            "0e01ed00dc006401900001000101ed0000",     // Target 22.0°C
+            "0e02660001000000060000000102660007",
+            "0e027e00010000000600000001027e0007"
+        ]
+        let dataDeltaHigh = CloudStoveData(deviceKey: nil, isOnline: true, values: nil, Values: dumpDeltaHigh, data: nil)
+        let mappedDeltaHigh = dataDeltaHigh.getMappedValues()
+        XCTAssertNotNil(mappedDeltaHigh)
+        if let mapped = mappedDeltaHigh {
+            XCTAssertEqual(mapped.effectivePower, 5, "Bei Delta T = 3.0°C muss Auto auf P5 modulieren")
+        }
+        
+        // Case 3: Status 6 (Modulation): immer P1 (0.65 kg/h)
+        let dumpMod = [
+            "1000010000060007160300dc04000000028801", // status 06 (Modulation)
+            "0c81013100010b060501000000dc01",
+            "0e016c00060001000600000001016c0007"
+        ]
+        let dataMod = CloudStoveData(deviceKey: nil, isOnline: true, values: nil, Values: dumpMod, data: nil)
+        let mappedMod = dataMod.getMappedValues()
+        XCTAssertNotNil(mappedMod)
+        if let mapped = mappedMod {
+            XCTAssertEqual(mapped.effectivePower, 1, "In Modulation muss effectivePower immer 1 sein")
+        }
+    }
 }
 

@@ -139,7 +139,8 @@ public class PelletTankManager: ObservableObject {
         
         // Only track active burning (Status 5 = Betrieb, 6 = Modulation), and pause when burning firewood
         if (statusCode == 5 || statusCode == 6) && !isWood && deltaSeconds > 0 && deltaSeconds < 3600 {
-            let hourlyRate = Self.ghibli10kWConsumptionRates[self.currentPowerLevel] ?? 1.00
+            let activeRateLevel = (statusCode == 6) ? 1 : self.currentPowerLevel
+            let hourlyRate = Self.ghibli10kWConsumptionRates[activeRateLevel] ?? 0.65
             let consumed = (hourlyRate / 3600.0) * deltaSeconds
             if consumed > 0 {
                 currentLevel = max(0, currentLevel - consumed)
