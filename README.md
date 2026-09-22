@@ -25,20 +25,20 @@
 
 ```mermaid
 graph TD
-    UI[ContentView / DashboardView] --> VM[StoveViewModel]
+    UI["ContentView / DashboardView"] --> VM["StoveViewModel"]
     
-    subgraph Services Layer
-        VM --> AUTH[AuthService]
-        VM --> CLOUD[CloudService]
-        VM --> SOCKET[StoveSocketService]
-        VM --> UDP[UDPDiscoveryService]
-        VM --> ERR[StoveError System]
-    END
+    subgraph ServicesLayer ["Services Layer"]
+        VM --> AUTH["AuthService"]
+        VM --> CLOUD["CloudService"]
+        VM --> SOCKET["StoveSocketService"]
+        VM --> UDP["UDPDiscoveryService"]
+        VM --> ERR["StoveError System"]
+    end
     
-    AUTH -->|OAuth2 /Token| AZURE[4Heat Azure Cloud]
-    CLOUD -->|REST GET Summary / POST command| AZURE
-    SOCKET -->|TCP Port 80 + \\n Delimiter| STOVE[Dielle / 4Heat Wi-Fi Module]
-    UDP -->|UDP Broadcast| STOVE
+    AUTH -->|"OAuth2 /Token"| AZURE["4Heat Azure Cloud"]
+    CLOUD -->|"REST GET Summary / POST command"| AZURE
+    SOCKET -->|"TCP Port 80 + \\n Delimiter"| STOVE["Dielle / 4Heat Wi-Fi Module"]
+    UDP -->|"UDP Broadcast"| STOVE
 ```
 
 ---
