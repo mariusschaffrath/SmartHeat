@@ -49,6 +49,7 @@ class StoveViewModel: ObservableObject {
     @Published var haService = HomeAssistantService.shared
     @Published var socketService = StoveSocketService()
     @Published var scheduleManager = HeatingScheduleManager.shared
+    @Published var liveActivityManager = StoveLiveActivityManager.shared
     
     // MARK: - Concurrency & Task Management (Hürde 5.3)
     @MainActor private var burstSyncTask: Task<Void, Never>?
@@ -739,6 +740,17 @@ class StoveViewModel: ObservableObject {
                 operationalState = .off
             }
         }
+        
+        // ActivityKit Live Activity & Dynamic Island synchronisieren
+        liveActivityManager.syncWithStove(
+            operationalState: operationalState,
+            stoveStatus: stoveStatus,
+            exhaustTemp: exhaustTemp,
+            roomTemp: currentTemp,
+            targetTemp: targetTemp,
+            powerLevel: effectivePowerLevel,
+            isWoodActive: isWoodMode
+        )
     }
     
     // MARK: - Alarm Quittierung & Entsperren (Sblocco)
@@ -790,13 +802,31 @@ class StoveViewModel: ObservableObject {
         triggerInteractionLock()
         operationalState = .igniting
         stoveStatus = "Zündung"
+        liveActivityManager.syncWithStove(
+            operationalState: .igniting,
+            stoveStatus: "Zündung",
+            exhaustTemp: exhaustTemp,
+            roomTemp: currentTemp,
+            targetTemp: targetTemp,
+            powerLevel: effectivePowerLevel,
+            isWoodActive: isWoodMode
+        )
         sendUniversal(command: .turnOn) 
     }
     
     func turnOff() { 
         triggerInteractionLock()
         operationalState = .off
-        stoveStatus = "Aus"
+        stoveStatus = "Ausbrand"
+        liveActivityManager.syncWithStove(
+            operationalState: .off,
+            stoveStatus: "Ausbrand",
+            exhaustTemp: exhaustTemp,
+            roomTemp: currentTemp,
+            targetTemp: targetTemp,
+            powerLevel: effectivePowerLevel,
+            isWoodActive: false
+        )
         sendUniversal(command: .turnOff) 
     }
     

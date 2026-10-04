@@ -11,7 +11,7 @@ import Network
 import Combine
 
 /// Thread-safe one-shot continuation wrapper for Swift 6 strict concurrency compliance
-private final class SafeContinuation<T: Sendable>: @unchecked Sendable {
+nonisolated private final class SafeContinuation<T: Sendable>: @unchecked Sendable {
     private let lock = NSLock()
     private var didResume = false
     private let continuation: CheckedContinuation<T, Error>

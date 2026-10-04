@@ -20,6 +20,8 @@
 	<string>1</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Die App benötigt Bluetooth, um sich direkt mit dem Ofen zu verbinden.</string>
 	<key>NSLocalNetworkUsageDescription</key>
