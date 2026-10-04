@@ -233,11 +233,18 @@ struct HomeDashboardView: View {
                                     .font(.system(size: 24, weight: .heavy, design: .rounded))
                                     .foregroundColor(.primary)
                                 
-                                // Dezent: Cloud-Verbindungsstatus (stilles Icon)
+                                // Verbindungsstatus: Exklusiv Cloud
                                 if viewModel.authService.isAuthenticated {
-                                    Image(systemName: "checkmark.icloud.fill")
-                                        .font(.system(size: 13, weight: .bold))
-                                        .foregroundColor(.green.opacity(0.85))
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "cloud.fill")
+                                            .font(.system(size: 11, weight: .bold))
+                                        Text("Cloud")
+                                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                    }
+                                    .foregroundColor(.blue.opacity(0.9))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.blue.opacity(0.12), in: Capsule())
                                 }
                             }
                             

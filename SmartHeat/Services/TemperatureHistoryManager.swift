@@ -50,6 +50,8 @@ public class TemperatureHistoryManager: ObservableObject {
         loadHistory()
     }
     
+    nonisolated deinit {}
+    
     /// Replaces/merges synthetic or partial local data with 24/7 verified database history from Home Assistant
     public func updateWithHomeAssistantData(roomPoints: [TemperaturePoint], exhaustPoints: [TemperaturePoint]) {
         guard !roomPoints.isEmpty || !exhaustPoints.isEmpty else { return }

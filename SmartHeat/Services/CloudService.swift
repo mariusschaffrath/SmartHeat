@@ -99,7 +99,7 @@ public struct CloudStoveData: Codable {
                 
                 // Room Temp at offset 20..24
                 if let tpRaw = extractSignedInt16(from: block, start: 20) {
-                    if tpRaw > 0 && tpRaw != -127 {
+                    if tpRaw >= -400 && tpRaw <= 1200 && tpRaw != -1270 {
                         room = Double(tpRaw) * multTemp
                     }
                 }
@@ -273,6 +273,19 @@ public class CloudService: ObservableObject {
     
     private(set) public var baseURL = "https://wifi4heat.azurewebsites.net/api/devices"
     
+    /// Dedizierte, energieeffiziente URLSession ohne lokalen Disk-Cache (schont iPhone-NAND und spart Akku)
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 4.5
+        config.timeoutIntervalForResource = 8.0
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.urlCache = nil
+        return URLSession(configuration: config)
+    }()
+    
+    public init() {}
+    nonisolated deinit {}
+    
     func setBaseURL(_ url: String) {
         self.baseURL = url
     }
@@ -322,7 +335,7 @@ public class CloudService: ObservableObject {
                 request.timeoutInterval = 4.5
                 
                 do {
-                    let (data, response) = try await URLSession.shared.data(for: request)
+                    let (data, response) = try await CloudService.session.data(for: request)
                     guard !Task.isCancelled else { return (nil, nil) }
                     let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
                     
@@ -398,7 +411,7 @@ public class CloudService: ObservableObject {
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await CloudService.session.data(for: request)
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
             
             if statusCode == 200 {

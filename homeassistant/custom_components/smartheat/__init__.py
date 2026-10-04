@@ -50,6 +50,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         base_url=base_url,
     )
 
+    # Initial load of persistent pellet storage before first refresh (Hürde 3.1)
+    await coordinator.async_load()
+
     # Initial fetch
     await coordinator.async_config_entry_first_refresh()
 
@@ -70,8 +73,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator.refill_full()
         _LOGGER.info("SmartHeat: Pellet-Tank voll befüllt (20kg).")
 
+    async def handle_set_pellet_level(call: ServiceCall) -> None:
+        """Service to set pellet level in kg (Hürde 3.1)."""
+        level = call.data.get("level")
+        if level is None:
+            level = call.data.get("pellet_level_kg")
+        if level is not None:
+            await coordinator.async_set_pellet_level(float(level))
+            _LOGGER.info("SmartHeat: Pellet-Füllstand manuell gesetzt auf %.2f kg.", float(level))
+
     hass.services.async_register(DOMAIN, "refill_bag", handle_refill_bag)
     hass.services.async_register(DOMAIN, "refill_full", handle_refill_full)
+    hass.services.async_register(DOMAIN, "set_pellet_level", handle_set_pellet_level)
 
     return True
 
@@ -80,5 +93,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        coordinator: SmartHeatCoordinator = hass.data[DOMAIN].pop(entry.entry_id, None)
+        if coordinator:
+            await coordinator.async_close_local_socket()
     return unload_ok

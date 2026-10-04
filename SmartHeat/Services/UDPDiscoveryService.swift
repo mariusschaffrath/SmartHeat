@@ -12,31 +12,36 @@ class UDPDiscoveryService: ObservableObject {
     @Published var discoveredIP: String?
     @Published var isScanning = false
     @Published var logs: String = ""
+    private var timeoutWorkItem: DispatchWorkItem?
     
+    /// Startet die gedrosselte On-Demand-Suche nach dem Ofen im lokalen Netzwerk
     func discoverStove() {
         guard !isScanning else { return }
         self.isScanning = true
         self.logs = ""
-        self.addLog("Suche Ofen im Netzwerk...")
+        self.addLog("Suche Ofen im Netzwerk (On-Demand)...")
         
         setupListener()
         setupBonjourBrowser()
         sendBroadcast()
         scanSubnet()
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
-            guard let self else { return }
+        // Drosselung auf 12 Sekunden On-Demand Timeout
+        let timeoutItem = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
             Task { @MainActor in
                 if self.isScanning {
-                    self.addLog("Suche abgeschlossen.")
-                    self.isScanning = false
+                    self.addLog("Suche abgeschlossen (Timeout).")
                     self.stopDiscovery()
                 }
             }
         }
+        self.timeoutWorkItem = timeoutItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: timeoutItem)
     }
     
     private func scanSubnet() {
+        guard isScanning else { return }
         guard let localIP = getLocalIPAddress() else { return }
         let components = localIP.components(separatedBy: ".")
         guard components.count == 4 else { return }
@@ -185,15 +190,27 @@ class UDPDiscoveryService: ObservableObject {
     }
     
     func stopDiscovery() {
-        for conn in connections { conn.cancel() }
+        timeoutWorkItem?.cancel()
+        timeoutWorkItem = nil
+        isScanning = false
+        
+        for conn in connections {
+            conn.cancel()
+        }
         connections.removeAll()
+        
         listener?.cancel()
+        listener = nil
+        
         browser?.cancel()
+        browser = nil
+        
+        self.addLog("UDP/Bonjour-Discovery vollständig gestoppt.")
     }
 }
 
 extension NWEndpoint {
-    func extractHost() -> NWEndpoint.Host? {
+    nonisolated func extractHost() -> NWEndpoint.Host? {
         if case let .hostPort(host, _) = self { return host }
         return nil
     }

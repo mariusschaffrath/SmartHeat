@@ -57,3 +57,62 @@ CONSUMPTION_RATES = {
     5: 2.25,
     6: 0.65,  # Auto / Modulation
 }
+
+# Dielle Hardware Alarm Mappings (Er01..Er42)
+DIELLE_ALARM_MAPPINGS = {
+    1: {
+        "name": "Überhitzungsthermostat Kessel/Wasser",
+        "beschreibung": "Überhitzung Wassertasche / Kesselkörper festgestellt.",
+        "abhilfe": "Abkühlung abwarten, Pumpe & Vorlauf prüfen. Alarm quittieren.",
+    },
+    2: {
+        "name": "Sicherheitsdruckwächter Wasserdruck",
+        "beschreibung": "Druckfehler im Wasserkreislauf.",
+        "abhilfe": "Anlagendruck prüfen (Soll: 1.2–1.5 bar) und Alarm quittieren.",
+    },
+    3: {
+        "name": "Erloschene Flamme / Pellets leer",
+        "beschreibung": "Keine Flamme im Heizbetrieb oder Pellettank leer.",
+        "abhilfe": "Pellets nachfüllen, Brenner kontrollieren und Alarm quittieren.",
+    },
+    4: {
+        "name": "Fehlzündung",
+        "beschreibung": "Temperaturanstieg bei Zündung zu gering.",
+        "abhilfe": "Brennraum reinigen, Glühkerze prüfen und Zündung erneut starten.",
+    },
+    5: {
+        "name": "Rauchgastemperaturfühler defekt",
+        "beschreibung": "Rauchgastemperaturfühler defekt oder unterbrochen.",
+        "abhilfe": "Fühleranschluss an Platine sowie Verkabelung prüfen.",
+    },
+    7: {
+        "name": "Abgasgebläse Drehzahlfehler",
+        "beschreibung": "Der Drehzahlgeber (Encoder) des Abgasventilators meldet eine Blockade oder Unregelmäßigkeit.",
+        "abhilfe": "Rauchgasventilator auf Verschmutzung oder mechanische Blockade prüfen.",
+    },
+    8: {
+        "name": "Rauchgas-Übertemperatur",
+        "beschreibung": "Die Rauchgastemperatur hat den zulässigen Maximalwert überschritten.",
+        "abhilfe": "Ofen abkühlen lassen, Wärmetauscher und Kaminrohr auf Verrußung prüfen.",
+    },
+    12: {
+        "name": "Pelletmangel / Dosierer",
+        "beschreibung": "Pelletförderung unzureichend oder Zündtopf nicht befüllt.",
+        "abhilfe": "Pelletbehälter prüfen, Pellets nachfüllen und Alarm quittieren.",
+    },
+    39: {
+        "name": "Unterdruckwächter Brennraum / Kaminzug",
+        "beschreibung": "Schornsteinzug unzureichend oder Brennraumtür/Aschelade undicht.",
+        "abhilfe": "Brennraumtür schließen, Dichtungen und Schornsteinzug prüfen.",
+    },
+    41: {
+        "name": "Luftstrom-Minimum unterschritten",
+        "beschreibung": "Verbrennungsluftstrom liegt unter dem Schwellwert.",
+        "abhilfe": "Luftansaugrohr und Gebläse auf Verstopfung prüfen.",
+    },
+    42: {
+        "name": "Maximaler Luftstrom / Tür offen",
+        "beschreibung": "Luftstrom über Schwellwert oder Brennraumtür steht offen.",
+        "abhilfe": "Brennraumtür schließen und Sensor prüfen.",
+    },
+}

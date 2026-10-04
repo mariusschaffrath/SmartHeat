@@ -54,8 +54,18 @@ class AuthService: ObservableObject {
     
     private(set) public var baseURL = "https://wifi4heat.azurewebsites.net"
     
+    nonisolated deinit {}
+    
     func setBaseURL(_ url: String) {
         self.baseURL = url
+    }
+    
+    /// Strikte Form-URL-Kodierung (application/x-www-form-urlencoded),
+    /// damit Sonderzeichen wie '+' und '&' im Passwort nicht als Trenner oder Leerzeichen interpretiert werden.
+    private func formURLEncode(_ string: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._*")
+        return string.addingPercentEncoding(withAllowedCharacters: allowed) ?? string
     }
     
     func login(email: String, password: String) async throws {
@@ -69,8 +79,8 @@ class AuthService: ObservableObject {
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         
-        let encodedEmail = cleanEmail.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? cleanEmail
-        let encodedPassword = cleanPassword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? cleanPassword
+        let encodedEmail = formURLEncode(cleanEmail)
+        let encodedPassword = formURLEncode(cleanPassword)
         let body = "grant_type=password&username=\(encodedEmail)&password=\(encodedPassword)"
         request.httpBody = body.data(using: .utf8)
         

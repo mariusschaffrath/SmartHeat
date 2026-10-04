@@ -9,10 +9,11 @@
 import Foundation
 import SwiftUI
 import Combine
+import UIKit
 
 public enum StoveOperationalState: String, CaseIterable {
     case off = "Aus"
-    case on = "Ein"
+    case on = "Heizbetrieb"
     case standby = "Standby"
     case igniting = "Zündung"
     case error = "Störung"
@@ -20,7 +21,7 @@ public enum StoveOperationalState: String, CaseIterable {
     public var title: String {
         switch self {
         case .off: return "Aus"
-        case .on: return "Ein"
+        case .on: return "Heizbetrieb"
         case .standby: return "Standby"
         case .igniting: return "Zündung"
         case .error: return "Störung"
@@ -46,6 +47,60 @@ class StoveViewModel: ObservableObject {
     @Published var pelletManager = PelletTankManager()
     @Published var historyManager = TemperatureHistoryManager.shared
     @Published var haService = HomeAssistantService.shared
+    @Published var socketService = StoveSocketService()
+    @Published var scheduleManager = HeatingScheduleManager.shared
+    
+    // MARK: - Concurrency & Task Management (Hürde 5.3)
+    @MainActor private var burstSyncTask: Task<Void, Never>?
+    
+    // MARK: - Dual-Path Connection (Hürde 2.1)
+    public enum ConnectionPath: String, CaseIterable, Sendable {
+        case localSocket = "localSocket"
+        case cloud = "cloud"
+        
+        public var title: String {
+            switch self {
+            case .localSocket: return "Lokales WLAN (Port 80)"
+            case .cloud: return "Dielle Cloud (Azure)"
+            }
+        }
+        
+        public var shortTitle: String {
+            switch self {
+            case .localSocket: return "Lokal"
+            case .cloud: return "Cloud"
+            }
+        }
+        
+        public var icon: String {
+            switch self {
+            case .localSocket: return "wifi"
+            case .cloud: return "cloud.fill"
+            }
+        }
+    }
+    
+    // MARK: - Exklusive Cloud-Synchronisation
+    public enum ConnectionMode: String, CaseIterable, Sendable {
+        case forceCloud = "forceCloud"
+        
+        public var title: String {
+            return "Dielle Cloud (Exklusiv)"
+        }
+        
+        public var description: String {
+            return "SmartHeat kommuniziert ausschließlich und stabil über die offizielle Dielle Azure Cloud."
+        }
+    }
+    
+    @Published var connectionMode: ConnectionMode = .forceCloud
+    @Published var connectionPath: ConnectionPath = .cloud
+    @Published var stoveLocalIP: String = UserDefaults.standard.string(forKey: "stove_local_ip") ?? "192.168.178.188" {
+        didSet {
+            UserDefaults.standard.set(stoveLocalIP, forKey: "stove_local_ip")
+            socketService.setHost(stoveLocalIP)
+        }
+    }
     
     // MARK: - Hardware Alarm & Sblocco State (Dielle 2ways / TiEmme)
     @Published var stoveErrorCode: Int = 0
@@ -53,8 +108,69 @@ class StoveViewModel: ObservableObject {
     @Published var activeHardwareAlarm: DielleHardwareAlarm? = nil
     @Published var isUnlocking: Bool = false
     
-    // MARK: - Diagnostics & Maintenance (Feature 3)
-    @Published var diagnostics = StoveDiagnostics()
+    // MARK: - Diagnostics & Maintenance (Feature 3 & Hürde 3.4)
+    public static let diagnosticsStorageKey = "stove_diagnostics_data"
+    @Published var diagnostics: StoveDiagnostics = StoveDiagnostics()
+    private var lastDiagnosticsTrackingDate: Date?
+    private var isIgnitionCounted: Bool = false
+    
+    func loadDiagnostics() {
+        if let data = UserDefaults.standard.data(forKey: Self.diagnosticsStorageKey),
+           let saved = try? JSONDecoder().decode(StoveDiagnostics.self, from: data) {
+            self.diagnostics = saved
+        } else {
+            self.diagnostics = StoveDiagnostics()
+        }
+    }
+    
+    func saveDiagnostics() {
+        if let encoded = try? JSONEncoder().encode(diagnostics) {
+            UserDefaults.standard.set(encoded, forKey: Self.diagnosticsStorageKey)
+        }
+    }
+    
+    func updateDiagnosticsTracking(statusCode: Int, deltaSeconds: TimeInterval? = nil) {
+        let now = Date()
+        
+        // Zähler für erfolgreiche Zündungen: Reset bei Aus/Standby (0, 9, 11), Erhöhung bei Zündung (1, 2)
+        if statusCode == 0 || statusCode == 9 || statusCode == 11 {
+            isIgnitionCounted = false
+        } else if !isIgnitionCounted && (statusCode == 1 || statusCode == 2) {
+            diagnostics.ignitionCount += 1
+            isIgnitionCounted = true
+            saveDiagnostics()
+        }
+        
+        let delta: TimeInterval
+        if let explicit = deltaSeconds {
+            delta = explicit
+            lastDiagnosticsTrackingDate = now
+        } else if let last = lastDiagnosticsTrackingDate {
+            delta = now.timeIntervalSince(last)
+            lastDiagnosticsTrackingDate = now
+        } else {
+            lastDiagnosticsTrackingDate = now
+            return
+        }
+        
+        guard delta > 0 && delta <= 7200 else { return }
+        
+        // Akkumulation von Brennstunden (z.B. wenn Status 1..6 oder 13 aktiv ist)
+        let isBurning = (1...6).contains(statusCode) || statusCode == 13
+        if isBurning {
+            diagnostics.heatingSeconds += delta
+            diagnostics.totalOperatingSeconds += delta
+            
+            let newHeatingHours = Int(diagnostics.heatingSeconds / 3600.0)
+            let newTotalHours = Int(diagnostics.totalOperatingSeconds / 3600.0)
+            
+            if newHeatingHours != diagnostics.heatingHours || newTotalHours != diagnostics.totalOperatingHours {
+                diagnostics.heatingHours = newHeatingHours
+                diagnostics.totalOperatingHours = newTotalHours
+                saveDiagnostics()
+            }
+        }
+    }
     
     // MARK: - Wood Combustion Tracking (Feature 4)
     @Published var woodTracker = WoodCombustionTracker.shared
@@ -101,7 +217,7 @@ class StoveViewModel: ObservableObject {
     }
     
     var isWoodMode: Bool {
-        (operationalState == .on && stoveStatus == "Scheitholz") || woodTracker.isWoodActive
+        (operationalState == .on && (stoveStatus == "Scheitholz" || stoveStatus == "Scheitholzbetrieb")) || woodTracker.isWoodActive
     }
     
     @Published var isTargetLocked: Bool = true {
@@ -174,11 +290,32 @@ class StoveViewModel: ObservableObject {
     
     @Published var lastRawMessage: String = ""
     
+    // MARK: - Akku- & Energie-Effizienz (Adaptive Polling & Stromsparmodus)
+    @Published var isLowPowerMode: Bool = ProcessInfo.processInfo.isLowPowerModeEnabled
+    @Published var isEcoModeEnabled: Bool = UserDefaults.standard.object(forKey: "stove_eco_polling_enabled") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(isEcoModeEnabled, forKey: "stove_eco_polling_enabled")
+            restartPollingTimerIfNeeded()
+        }
+    }
+    
     private var lastUserInteraction: Date = Date.distantPast
+    var lastInteractionBurstDate: Date = Date()
+    private var activePollingInterval: TimeInterval = 10.0
     
     func triggerInteractionLock() {
         lastUserInteraction = Date()
+        lastInteractionBurstDate = Date()
         resetAutoLockTimer()
+        restartPollingTimerIfNeeded()
+    }
+    
+    var isUserInteracting: Bool {
+        Date().timeIntervalSince(lastInteractionBurstDate) < 90.0
+    }
+    
+    var isStoveActive: Bool {
+        return stoveErrorCode != 0 || operationalState != .off || exhaustTemp > 50.0
     }
     
     private func isInteractionLocked() -> Bool {
@@ -195,6 +332,9 @@ class StoveViewModel: ObservableObject {
         configureEndpoints()
         startPolling()
         attemptAutoLogin()
+        Task { [weak self] in
+            await self?.evaluateConnectionPath()
+        }
         historyManager.seedInitialDataIfNeeded(
             currentRoom: currentTemp > 0 ? currentTemp : 21.6,
             currentExhaust: exhaustTemp > 0 ? exhaustTemp : 135.0,
@@ -207,6 +347,8 @@ class StoveViewModel: ObservableObject {
             }
         }
     }
+    
+    nonisolated deinit {}
     
     func configureEndpoints() {
         let cloudBase = "https://wifi4heat.azurewebsites.net"
@@ -260,6 +402,28 @@ class StoveViewModel: ObservableObject {
                 self?.historyManager.recordTelemetry(roomTemp: room, exhaustTemp: exh)
             }
             .store(in: &cancellables)
+            
+        // Lifecycle & Akku-Optimierung: Polling bei App-Hintergrund sofort stoppen
+        NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
+            .sink { [weak self] _ in
+                self?.pausePolling()
+            }
+            .store(in: &cancellables)
+            
+        NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
+            .sink { [weak self] _ in
+                self?.lastInteractionBurstDate = Date()
+                self?.restartPollingTimerIfNeeded()
+                self?.resumePolling()
+            }
+            .store(in: &cancellables)
+            
+        NotificationCenter.default.publisher(for: NSNotification.Name.NSProcessInfoPowerStateDidChange)
+            .sink { [weak self] _ in
+                self?.isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+                self?.restartPollingTimerIfNeeded()
+            }
+            .store(in: &cancellables)
     }
     
     private func forwardErrors() {
@@ -287,11 +451,75 @@ class StoveViewModel: ObservableObject {
         }
     }
     
+    // MARK: - Exklusive Cloud-Synchronisation & Polling
+    func evaluateConnectionPath() async {
+        if self.connectionPath != .cloud {
+            self.connectionPath = .cloud
+            restartPollingTimer()
+        }
+    }
+    
+    var currentPollingInterval: TimeInterval {
+        guard isEcoModeEnabled else {
+            return 10.0
+        }
+        if connectionPath == .localSocket {
+            return 3.0 // Legacy Fallback
+        }
+        // 1. Wenn Benutzer die App aktiv bedient -> Schnelle 10s (bzw. 15s im Stromsparmodus)
+        if isUserInteracting {
+            return isLowPowerMode ? 15.0 : 10.0
+        }
+        // 2. Wenn der Ofen brennt / heizt -> 10s (bzw. 15s im Stromsparmodus)
+        if isStoveActive {
+            return isLowPowerMode ? 15.0 : 10.0
+        }
+        // 3. Intelligenter Eco-Modus: Wenn Ofen AUS & Kalt ist -> 30s (bzw. 45s im Stromsparmodus)
+        // Reduziert iPhone-Funkmodem-Aufweckzyklen drastisch und spart bis zu 75% Akku im Standby!
+        return isLowPowerMode ? 45.0 : 30.0
+    }
+    
+    func restartPollingTimerIfNeeded() {
+        let targetInterval = currentPollingInterval
+        if abs(activePollingInterval - targetInterval) > 1.0 {
+            restartPollingTimer()
+        }
+    }
+    
     private func startPolling() {
         guard pollTimer == nil else { return }
-        pollTimer = Timer.publish(every: 3, on: .main, in: .common)
+        let interval = currentPollingInterval
+        activePollingInterval = interval
+        pollTimer = Timer.publish(every: interval, on: .main, in: .common)
             .autoconnect()
-            .sink { [weak self] _ in self?.refreshData() }
+            .sink { [weak self] _ in
+                self?.refreshData()
+                self?.evaluateHeatingSchedule()
+                self?.restartPollingTimerIfNeeded()
+            }
+    }
+    
+    // MARK: - Heating Schedule Evaluation (Hürde 5.4)
+    /// Periodische Überprüfung und automatische Nachführung des aktiven Wochen-Heizplans
+    func evaluateHeatingSchedule() {
+        guard scheduleManager.isScheduleActive else { return }
+        guard !isInteractionLocked() else { return }
+        guard pendingTargetTemp == nil else { return }
+        
+        guard let scheduledTemp = scheduleManager.getCurrentTargetTemperature() else { return }
+        let roundedScheduled = (scheduledTemp * 2).rounded() / 2
+        
+        // Wenn sich der geplante Sollwert von der aktuellen Zieltemperatur unterscheidet
+        if abs(self.targetTemp - roundedScheduled) >= 0.25 {
+            print("SCHEDULE: Wende geplanten Sollwert an: \(roundedScheduled)°C (aktuell: \(self.targetTemp)°C)")
+            self.setTargetTempDirect(roundedScheduled)
+        }
+    }
+    
+    func restartPollingTimer() {
+        pollTimer?.cancel()
+        pollTimer = nil
+        startPolling()
     }
     
     /// Pausiert den Polling-Timer und bricht laufende Sync-Tasks ab (z.B. bei App im Hintergrund)
@@ -309,13 +537,14 @@ class StoveViewModel: ObservableObject {
         pausePolling()
         print("LIFECYCLE: Polling reaktiviert (App aktiv).")
         startPolling()
-        refreshData()
+        Task { [weak self] in
+            await self?.evaluateConnectionPath()
+            self?.refreshData()
+        }
     }
     
     func refreshData() {
-        guard authService.isAuthenticated, let token = authService.token else { return }
         guard !isSyncing else { return } // Verhindert das Anhäufen paralleler Anfragen
-        let keyToUse = deviceId.isEmpty ? "25016460" : deviceId
         self.isSyncing = true
         
         currentSyncTask?.cancel()
@@ -324,103 +553,16 @@ class StoveViewModel: ObservableObject {
                 self?.isSyncing = false
             }
             guard let self = self else { return }
+            
+            // Exklusiver Pfad: Azure Cloud API
+            guard self.authService.isAuthenticated, let token = self.authService.token else { return }
+            let keyToUse = self.deviceId.isEmpty ? "25016460" : self.deviceId
+            
             do {
                 if let data = try await self.cloudService.fetchStoveUpdate(deviceKey: keyToUse, token: token) {
                     guard !Task.isCancelled else { return }
                     if let mapped = data.getMappedValues() {
-                        self.currentTemp = mapped.room
-                        self.exhaustTemp = mapped.exhaust
-                        
-                        // Optimistic Confirmation Check for Target Temperature (verhindert Zurückspringen)
-                        if let pending = self.pendingTargetTemp {
-                            if abs(mapped.target - pending) < 0.2 {
-                                self.pendingTargetTemp = nil
-                                self.targetTemp = mapped.target
-                                print("SYNC: Zieltemperatur \(mapped.target)°C vom Ofen bestätigt!")
-                            } else if Date().timeIntervalSince(self.pendingTargetTime) < 45.0 {
-                                self.targetTemp = pending
-                            } else {
-                                self.pendingTargetTemp = nil
-                                self.targetTemp = mapped.target
-                            }
-                        } else if !self.isInteractionLocked() && mapped.target > 0 {
-                            self.targetTemp = mapped.target
-                        }
-                        
-                        self.waterTemp = mapped.water
-                        self.waterPressure = mapped.pressure
-                        self.powerLevel = mapped.powerLevel
-                        self.effectivePowerLevel = mapped.effectivePower
-                        self.isAutoPower = (mapped.powerLevel == 6)
-                        if mapped.status == 0 {
-                            self.effectivePowerDisplay = "Aus"
-                        } else if mapped.status == 6 {
-                            self.effectivePowerDisplay = "Stufe 1 (Modulation)"
-                        } else if self.isAutoPower {
-                            self.effectivePowerDisplay = "Auto (Stufe \(mapped.effectivePower))"
-                        } else {
-                            self.effectivePowerDisplay = "Stufe \(mapped.powerLevel)"
-                        }
-                        
-                        // Optimistic Confirmation Check for Kanal 1 Fan Speed
-                        if let pendingFan = self.pendingKanal1Speed {
-                            if mapped.kanal1 == pendingFan {
-                                self.pendingKanal1Speed = nil
-                                self.kanal1FanSpeed = mapped.kanal1
-                                print("SYNC: Kanalgebläse Stufe \(mapped.kanal1) vom Ofen bestätigt!")
-                            } else if Date().timeIntervalSince(self.pendingKanal1Time) < 45.0 {
-                                self.kanal1FanSpeed = pendingFan
-                            } else {
-                                self.pendingKanal1Speed = nil
-                                if mapped.kanal1 >= 0 {
-                                    self.kanal1FanSpeed = mapped.kanal1
-                                }
-                            }
-                        } else if !self.isInteractionLocked() {
-                            if mapped.kanal1 >= 0 {
-                                self.kanal1FanSpeed = mapped.kanal1
-                            }
-                        }
-                        
-                        if !self.isInteractionLocked() && mapped.kanal2 >= 0 {
-                            self.kanal2FanSpeed = mapped.kanal2
-                        }
-                        self.updateStatusLabel(mapped.status, errorCode: mapped.errorCode)
-                        
-                        // Alarm Handling: Status 8 (Sicurezza), Status 9 (Blocco), Status 10 (Errore), oder errorCode > 0
-                        if mapped.errorCode > 0 {
-                            self.stoveErrorCode = mapped.errorCode
-                            let alarm = DielleHardwareAlarm.from(code: mapped.errorCode)
-                            self.activeHardwareAlarm = alarm
-                            self.isStoveLockedByAlarm = true
-                            if let alarm = alarm {
-                                StoveErrorLogManager.shared.logError(
-                                    code: alarm.codeString,
-                                    customDetail: "\(alarm.description)\nEmpfohlene Behebung: \(alarm.remedy)"
-                                )
-                            }
-                        } else if mapped.status == 8 || mapped.status == 9 {
-                            self.isStoveLockedByAlarm = true
-                            let alarm = DielleHardwareAlarm(
-                                code: 99,
-                                codeString: "BLOCK",
-                                title: "Ofen verriegelt (Sicherheitsabschaltung)",
-                                description: "Die Platine meldet eine Sicherheitsabschaltung / Blockierung.",
-                                remedy: "Brennkammer kontrollieren und Störung quittieren."
-                            )
-                            self.activeHardwareAlarm = alarm
-                            StoveErrorLogManager.shared.logError(code: "BLOCK", customDetail: alarm.description)
-                        } else {
-                            self.stoveErrorCode = 0
-                            self.isStoveLockedByAlarm = false
-                            self.activeHardwareAlarm = nil
-                        }
-                        
-                        if self.isPelletTankEnabled {
-                            self.pelletManager.updateTracking(statusCode: mapped.status, powerLevel: mapped.effectivePower, isWood: mapped.isWood)
-                        }
-                        self.woodTracker.update(statusCode: mapped.status, exhaustTemp: mapped.exhaust)
-                        self.lastRawMessage = "Cloud Live-Daten empfangen."
+                        self.applyMappedValues(mapped, source: "Cloud (Azure)")
                     } else if let vals = data.values ?? data.data {
                         if let r = vals["I30006"] ?? vals["30006"], let rv = Double(r) { self.currentTemp = rv / 10.0 }
                         if !self.isInteractionLocked() {
@@ -441,6 +583,120 @@ class StoveViewModel: ObservableObject {
         }
     }
     
+    // MARK: - Service Maintenance Reset
+    /// Quittiert die durchgeführte 2.000h Wartung und startet das Intervall neu
+    func resetServiceMaintenance() {
+        diagnostics.resetService(operatingHours: diagnostics.totalOperatingHours)
+        saveDiagnostics()
+        objectWillChange.send()
+        print("SERVICE: 2.000h Wartung erfolgreich quittiert bei \(diagnostics.totalOperatingHours) Betriebsstunden.")
+    }
+    
+    func updateTelemetry(values: [String], source: String = "Live") {
+        let data = CloudStoveData(deviceKey: nil, isOnline: true, values: nil, Values: values, data: nil)
+        if let mapped = data.getMappedValues() {
+            self.applyMappedValues(mapped, source: source)
+        }
+    }
+    
+    func applyMappedValues(_ mapped: (room: Double, exhaust: Double, target: Double, water: Double, pressure: Double, status: Int, powerLevel: Int, effectivePower: Int, flurFan: Int, kanal1: Int, kanal2: Int, isWood: Bool, errorCode: Int), source: String) {
+        self.currentTemp = mapped.room
+        self.exhaustTemp = mapped.exhaust
+        
+        // Optimistic Confirmation Check for Target Temperature (verhindert Zurückspringen)
+        if let pending = self.pendingTargetTemp {
+            if abs(mapped.target - pending) < 0.2 {
+                self.pendingTargetTemp = nil
+                self.targetTemp = mapped.target
+                print("SYNC: Zieltemperatur \(mapped.target)°C vom Ofen bestätigt (\(source))!")
+            } else if Date().timeIntervalSince(self.pendingTargetTime) < 45.0 {
+                self.targetTemp = pending
+            } else {
+                self.pendingTargetTemp = nil
+                self.targetTemp = mapped.target
+            }
+        } else if !self.isInteractionLocked() && mapped.target > 0 {
+            self.targetTemp = mapped.target
+        }
+        
+        self.waterTemp = mapped.water
+        self.waterPressure = mapped.pressure
+        self.powerLevel = mapped.powerLevel
+        self.effectivePowerLevel = mapped.effectivePower
+        self.isAutoPower = (mapped.powerLevel == 6)
+        if mapped.status == 0 {
+            self.effectivePowerDisplay = "Aus"
+        } else if mapped.status == 6 {
+            self.effectivePowerDisplay = "Stufe 1 (Modulation)"
+        } else if self.isAutoPower {
+            self.effectivePowerDisplay = "Auto (Stufe \(mapped.effectivePower))"
+        } else {
+            self.effectivePowerDisplay = "Stufe \(mapped.powerLevel)"
+        }
+        
+        // Optimistic Confirmation Check for Kanal 1 Fan Speed
+        if let pendingFan = self.pendingKanal1Speed {
+            if mapped.kanal1 == pendingFan {
+                self.pendingKanal1Speed = nil
+                self.kanal1FanSpeed = mapped.kanal1
+                print("SYNC: Kanalgebläse Stufe \(mapped.kanal1) vom Ofen bestätigt (\(source))!")
+            } else if Date().timeIntervalSince(self.pendingKanal1Time) < 45.0 {
+                self.kanal1FanSpeed = pendingFan
+            } else {
+                self.pendingKanal1Speed = nil
+                if mapped.kanal1 >= 0 {
+                    self.kanal1FanSpeed = mapped.kanal1
+                }
+            }
+        } else if !self.isInteractionLocked() {
+            if mapped.kanal1 >= 0 {
+                self.kanal1FanSpeed = mapped.kanal1
+            }
+        }
+        
+        if !self.isInteractionLocked() && mapped.kanal2 >= 0 {
+            self.kanal2FanSpeed = mapped.kanal2
+        }
+        self.updateStatusLabel(mapped.status, errorCode: mapped.errorCode)
+        
+        // Alarm Handling: Status 8 (Sicurezza), Status 9 (Blocco), Status 10 (Errore), oder errorCode > 0
+        if mapped.errorCode > 0 {
+            self.stoveErrorCode = mapped.errorCode
+            let alarm = DielleHardwareAlarm.from(code: mapped.errorCode)
+            self.activeHardwareAlarm = alarm
+            self.isStoveLockedByAlarm = true
+            if let alarm = alarm {
+                StoveErrorLogManager.shared.logError(
+                    code: alarm.codeString,
+                    customDetail: "\(alarm.description)\nEmpfohlene Behebung: \(alarm.remedy)"
+                )
+            }
+        } else if mapped.status == 8 || mapped.status == 9 {
+            self.isStoveLockedByAlarm = true
+            let alarm = DielleHardwareAlarm(
+                code: 99,
+                codeString: "BLOCK",
+                title: "Ofen verriegelt (Sicherheitsabschaltung)",
+                description: "Die Platine meldet eine Sicherheitsabschaltung / Blockierung.",
+                remedy: "Brennkammer kontrollieren und Störung quittieren."
+            )
+            self.activeHardwareAlarm = alarm
+            StoveErrorLogManager.shared.logError(code: "BLOCK", customDetail: alarm.description)
+        } else {
+            self.stoveErrorCode = 0
+            self.isStoveLockedByAlarm = false
+            self.activeHardwareAlarm = nil
+        }
+        
+        if self.isPelletTankEnabled {
+            self.pelletManager.updateTracking(statusCode: mapped.status, powerLevel: mapped.effectivePower, isWood: mapped.isWood)
+        }
+        self.woodTracker.update(statusCode: mapped.status, exhaustTemp: mapped.exhaust)
+        self.updateDiagnosticsTracking(statusCode: mapped.status)
+        self.evaluateHeatingSchedule()
+        self.lastRawMessage = "\(source): Live-Daten empfangen."
+    }
+    
     private func updateStatusLabel(_ code: Int, errorCode: Int = 0) {
         if errorCode > 0 || code == 8 || code == 9 {
             let codeStr = errorCode > 0 ? String(format: "Er%02d", errorCode) : "Blockiert"
@@ -454,23 +710,29 @@ class StoveViewModel: ObservableObject {
             stoveStatus = "Aus"
             operationalState = .off
         case 1, 2, 3, 4:
-            stoveStatus = (code == 2) ? "Zündung" : "Zündung / Start"
+            stoveStatus = (code == 1 ? "Zündung Phase 1" : (code == 2 ? "Zündung Phase 2" : (code == 3 ? "Zündung Phase 3" : "Stabilisierung")))
             operationalState = .igniting
-        case 5, 13:
-            stoveStatus = (code == 13) ? "Scheitholz" : "Ein"
+        case 5:
+            stoveStatus = "Heizbetrieb"
             operationalState = .on
-        case 6, 7:
-            stoveStatus = (code == 6) ? "Modulation" : "Ausbrand"
-            operationalState = (code == 6) ? .on : .off
+        case 6:
+            stoveStatus = "Modulation"
+            operationalState = .on
+        case 7:
+            stoveStatus = "Ausbrand"
+            operationalState = .off
         case 10:
             stoveStatus = "Ascheentleerung / Reinigung"
             operationalState = .off
         case 11:
             stoveStatus = "Standby"
             operationalState = .standby
+        case 13:
+            stoveStatus = "Scheitholzbetrieb"
+            operationalState = .on
         default:
             if code > 0 {
-                stoveStatus = "Ein"
+                stoveStatus = "Heizbetrieb"
                 operationalState = .on
             } else {
                 stoveStatus = "Aus"
@@ -485,6 +747,7 @@ class StoveViewModel: ObservableObject {
     /// Er führt KEINE Zündung durch.
     func unlockStoveAlarm() async {
         guard !isUnlocking else { return }
+        triggerInteractionLock()
         isUnlocking = true
         defer { isUnlocking = false }
         
@@ -568,32 +831,21 @@ class StoveViewModel: ObservableObject {
     
     func setKanalFanSpeed(channel: Int, speed: Int) {
         triggerInteractionLock()
-        let clamped = max(0, min(7, speed))
+        let clamped = max(0, min(6, speed))
+        
+        // Riscaldamento / Luftheizung Flur: Es darf ausschließlich Register 023f beschrieben werden!
+        // Schutz vor Verbrennungsluft-Fehlkonfiguration: Register 027e (Brennraum Luftzufuhr 2) darf keinesfalls mitgeschrieben werden.
+        self.kanal1FanSpeed = clamped
+        self.pendingKanal1Speed = clamped
+        self.pendingKanal1Time = Date()
+        UserDefaults.standard.set(clamped, forKey: "saved_kanal1_speed")
         
         if syncFanChannels {
-            self.kanal1FanSpeed = clamped
             self.kanal2FanSpeed = clamped
-            self.pendingKanal1Speed = clamped
-            self.pendingKanal1Time = Date()
-            UserDefaults.standard.set(clamped, forKey: "saved_kanal1_speed")
             UserDefaults.standard.set(clamped, forKey: "saved_kanal2_speed")
-            sendUniversalWithBurst(command: StoveCommand.writeParameter(id: "023f", value: clamped))
-            sendUniversal(command: StoveCommand.writeParameter(id: "027e", value: clamped))
-        } else {
-            if channel == 1 {
-                // Luftheizung Flur (Riscaldamento) ist Register 023f
-                self.kanal1FanSpeed = clamped
-                self.pendingKanal1Speed = clamped
-                self.pendingKanal1Time = Date()
-                UserDefaults.standard.set(clamped, forKey: "saved_kanal1_speed")
-                sendUniversalWithBurst(command: StoveCommand.writeParameter(id: "023f", value: clamped))
-            } else {
-                // Zusatzkanal / Luftzufuhr ist Register 027e
-                self.kanal2FanSpeed = clamped
-                UserDefaults.standard.set(clamped, forKey: "saved_kanal2_speed")
-                sendUniversal(command: StoveCommand.writeParameter(id: "027e", value: clamped))
-            }
         }
+        
+        sendUniversalWithBurst(command: StoveCommand.writeParameter(id: "023f", value: clamped))
     }
     
     func setFlurFanSpeed(_ speed: Int) {
@@ -621,31 +873,40 @@ class StoveViewModel: ObservableObject {
         }
     }
     
-    /// Sendet Befehl und führt eine schnelle Folgeabfrage durch (1.5s, 3.5s, 6.0s), um die Synchronisationszeit drastisch zu verkürzen
+    /// Sendet Befehl über die Cloud und führt schnelle Folgeabfragen durch
     private func sendUniversalWithBurst(command: StoveCommand) {
+        self.isSyncing = true
+        burstSyncTask?.cancel()
+        
         guard authService.isAuthenticated, let token = authService.token else {
             print("Cloud nicht angemeldet. Befehl lokal gemockt: \(command.rawString)")
+            self.isSyncing = false
             return
         }
         
         let keyToUse = deviceId.isEmpty ? "25016460" : deviceId
-        self.isSyncing = true
 
-        Task {
+        burstSyncTask = Task { [weak self] in
+            guard let self = self else { return }
             do {
-                try await cloudService.sendCommand(deviceKey: keyToUse, token: token, command: command)
+                try await self.cloudService.sendCommand(deviceKey: keyToUse, token: token, command: command)
+                guard !Task.isCancelled else { return }
                 
                 let delays: [UInt64] = [1_500_000_000, 2_000_000_000, 2_500_000_000]
                 for delay in delays {
+                    guard !Task.isCancelled else { break }
                     try await Task.sleep(nanoseconds: delay)
+                    guard !Task.isCancelled else { break }
                     await MainActor.run { self.refreshData() }
                     let confirmed = await MainActor.run { self.pendingTargetTemp == nil && self.pendingKanal1Speed == nil }
                     if confirmed {
                         break
                     }
                 }
+                guard !Task.isCancelled else { return }
                 await MainActor.run { self.isSyncing = false }
             } catch {
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
                     self.isSyncing = false
                     print("Cloud Command Error: \(error.localizedDescription)")
@@ -661,6 +922,10 @@ class StoveViewModel: ObservableObject {
             authService.token = savedToken
             authService.isAuthenticated = true
         }
+        if let savedIP = UserDefaults.standard.string(forKey: "stove_local_ip"), !savedIP.isEmpty {
+            self.stoveLocalIP = savedIP
+        }
+        self.loadDiagnostics()
     }
     
     func logout() {
@@ -677,7 +942,8 @@ class StoveViewModel: ObservableObject {
     func syncHomeAssistantData() async {
         guard haService.isEnabled && !haService.accessToken.isEmpty else { return }
         do {
-            let (roomPoints, exhaustPoints) = try await haService.fetchTemperatureHistory(days: 30)
+            // Hürde 5.2: Begrenzung auf 48 Stunden (2 Tage) für schnellen Start und geringe RAM-Last
+            let (roomPoints, exhaustPoints) = try await haService.fetchTemperatureHistory(days: 2)
             if !roomPoints.isEmpty || !exhaustPoints.isEmpty {
                 self.historyManager.updateWithHomeAssistantData(roomPoints: roomPoints, exhaustPoints: exhaustPoints)
                 print("HA SYNC: \(roomPoints.count) Raum- und \(exhaustPoints.count) Abgaspunkte geladen.")

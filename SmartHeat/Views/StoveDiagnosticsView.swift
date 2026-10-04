@@ -10,6 +10,7 @@ import SwiftUI
 struct StoveDiagnosticsView: View {
     @ObservedObject var viewModel: StoveViewModel
     @Environment(\.dismiss) private var dismiss
+    @State private var showingResetAlert = false
     
     private var diagnostics: StoveDiagnostics {
         viewModel.diagnostics
@@ -58,17 +59,29 @@ struct StoveDiagnosticsView: View {
         }
         .navigationTitle("Betriebsdaten & Wartung")
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Wartungsintervall zurücksetzen?", isPresented: $showingResetAlert) {
+            Button("Abbrechen", role: .cancel) {}
+            Button("Wartung bestätigen", role: .destructive) {
+                viewModel.resetServiceMaintenance()
+            }
+        } message: {
+            Text("Möchtest du die 2.000-Stunden-Inspektion als durchgeführt markieren? Der Intervallzähler wird ab den aktuellen \(diagnostics.totalOperatingHours) Betriebsstunden für die nächsten 2.000 Stunden neu gestartet.")
+        }
     }
     
     // MARK: - Service Hero Card
     private var serviceInspectionHeroCard: some View {
         VStack(spacing: 16) {
             HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Wartungsintervall (2.000 h)")
-                        .font(.caption.bold())
-                        .foregroundColor(.secondary)
-                        .textCase(.uppercase)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text("Wartungsintervall (2.000 h)")
+                            .font(.caption.bold())
+                            .foregroundColor(.secondary)
+                            .textCase(.uppercase)
+                        
+                        serviceStatusBadge
+                    }
                     
                     if diagnostics.isServiceDue {
                         Text("Inspektion fällig!")
@@ -129,6 +142,41 @@ struct StoveDiagnosticsView: View {
                 }
             }
             .frame(height: 8)
+            
+            // Letzte Wartung Info & Quittierungs-Button
+            Divider().opacity(0.15)
+            
+            if let lastDate = diagnostics.lastServiceDate {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundColor(.green)
+                        .font(.caption)
+                    Text("Letzte Wartung: \(lastDate.formatted(date: .numeric, time: .omitted)) (bei \(diagnostics.lastServiceOperatingHours) h)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+            }
+            
+            Button(action: {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                showingResetAlert = true
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.counterclockwise.circle.fill")
+                        .font(.subheadline.bold())
+                    Text(diagnostics.isServiceDue ? "2.000h Wartung jetzt quittieren" : "Wartungsintervall zurücksetzen")
+                        .font(.subheadline.bold())
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 11)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(diagnostics.isServiceDue ? Color.red.opacity(0.85) : Color.blue.opacity(0.75))
+                )
+            }
+            .buttonStyle(LiquidScaleButtonStyle())
         }
         .padding(18)
         .liquidGlass(
@@ -137,6 +185,24 @@ struct StoveDiagnosticsView: View {
             tintOpacity: 0.08,
             specularOpacity: 0.55
         )
+    }
+    
+    private var serviceStatusBadge: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(diagnostics.isServiceDue ? Color.red : (diagnostics.isServiceImminent ? Color.orange : Color.green))
+                .frame(width: 6, height: 6)
+            Text(diagnostics.isServiceDue ? "Fällig" : (diagnostics.isServiceImminent ? "Bald fällig" : "OK"))
+                .font(.caption2.bold())
+                .foregroundColor(diagnostics.isServiceDue ? .red : (diagnostics.isServiceImminent ? .orange : .green))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(
+            (diagnostics.isServiceDue ? Color.red : (diagnostics.isServiceImminent ? Color.orange : Color.green))
+                .opacity(0.12)
+        )
+        .clipShape(Capsule())
     }
     
     // MARK: - Metrics 2x2 Grid

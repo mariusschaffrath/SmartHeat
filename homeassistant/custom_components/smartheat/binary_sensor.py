@@ -11,7 +11,9 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from typing import Any
+
+from .const import DOMAIN, DIELLE_ALARM_MAPPINGS
 from .coordinator import SmartHeatCoordinator
 
 

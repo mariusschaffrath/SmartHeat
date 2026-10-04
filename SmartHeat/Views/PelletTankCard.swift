@@ -115,19 +115,31 @@ struct PelletTankCard: View {
             }
             .frame(height: 12)
             
-            // Status- & Verbrauchshinweis
+            // Status- & Verbrauchshinweis (Hürde 3.3)
             HStack(spacing: 6) {
-                if pelletManager.isWoodModeActive {
+                if pelletManager.isWoodModeActive || stoveStatus.contains("Scheitholz") {
                     Image(systemName: "leaf.fill")
                         .foregroundColor(.green)
                     Text("Hybrid-Scheitholz aktiv • Pelletverbrauch pausiert (0 kg/h)")
                         .font(.caption)
                         .foregroundColor(.green)
                         .fontWeight(.medium)
-                } else if stoveStatus.contains("Betrieb") || stoveStatus.contains("Modulation") {
+                } else if stoveStatus == "Heizbetrieb" || stoveStatus.contains("Heizbetrieb") || stoveStatus.contains("Betrieb") {
                     Image(systemName: "flame.fill")
                         .foregroundColor(.orange)
-                    Text("Stufe P\(pelletManager.currentPowerLevel) (\(String(format: "%.2f", pelletManager.currentHourlyConsumption)) kg/h) • Noch ca. \(String(format: "%.1f", pelletManager.remainingHours)) Std.")
+                    Text("Heizbetrieb • Stufe P\(pelletManager.currentPowerLevel) (\(String(format: "%.2f", pelletManager.currentHourlyConsumption)) kg/h) • Noch ca. \(String(format: "%.1f", pelletManager.remainingHours)) Std.")
+                        .font(.caption)
+                        .foregroundColor(.primary)
+                } else if stoveStatus == "Modulation" || stoveStatus.contains("Modulation") {
+                    Image(systemName: "flame.fill")
+                        .foregroundColor(.orange)
+                    Text("Modulation • Stufe P\(pelletManager.currentPowerLevel) (\(String(format: "%.2f", pelletManager.currentHourlyConsumption)) kg/h) • Noch ca. \(String(format: "%.1f", pelletManager.remainingHours)) Std.")
+                        .font(.caption)
+                        .foregroundColor(.primary)
+                } else if stoveStatus.contains("Zündung") {
+                    Image(systemName: "flame.fill")
+                        .foregroundColor(.yellow)
+                    Text("\(stoveStatus) • Zündphase aktiv • Noch ca. \(String(format: "%.1f", pelletManager.remainingHours)) Std.")
                         .font(.caption)
                         .foregroundColor(.primary)
                 } else {

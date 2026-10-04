@@ -102,6 +102,8 @@ public class HeatingScheduleManager: ObservableObject {
         }
     }
     
+    nonisolated deinit {}
+    
     // MARK: - Active Scheduled Temperature Calculation
     public func getCurrentTargetTemperature() -> Double? {
         guard isScheduleActive else { return nil }

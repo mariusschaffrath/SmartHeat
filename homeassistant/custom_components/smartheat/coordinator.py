@@ -11,6 +11,7 @@ import aiohttp
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
@@ -84,10 +85,21 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         self.session = async_get_clientsession(hass)
         self.token: Optional[str] = None
 
+        # Persistent storage for pellet tank tracking (Hürde 3.1)
+        self._store = Store(hass, 1, "smartheat_pellet_storage")
+        self._store_loaded: bool = False
+        self._pellet_level_changed: bool = False
+
         # Pellet Tank Tracking State
         self.tank_capacity = DEFAULT_TANK_CAPACITY_KG
-        self.pellet_level = DEFAULT_TANK_CAPACITY_KG
+        self.pellet_level = 15.0  # Sinnvoller Standardwert: 15.0 kg
+        self.daily_consumption: float = 0.0
+        self.last_consumption_date: Optional[str] = None
         self.last_update_time: Optional[datetime] = None
+
+        # Zündungs-Primer Abzug (Hürde 3.2: 200g bei Zündungsstart)
+        self._previous_status_code: Optional[int] = None
+        self._ignition_primer_deducted: bool = False
 
         # Optimistic Confirmation / Pending State (verhindert Zurückspringen alter Werte)
         self.pending_flur_fan: Optional[int] = None
@@ -95,43 +107,112 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         self.pending_target_temp: Optional[float] = None
         self.pending_target_temp_time: Optional[float] = None
 
+        # Persistent TCP Socket State (ESP32 Port 80 connection reuse)
+        self._reader: Optional[asyncio.StreamReader] = None
+        self._writer: Optional[asyncio.StreamWriter] = None
+        self._socket_lock = asyncio.Lock()
+        self._rx_buffer = b""
+
+    async def _async_ensure_local_connection(self) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        """Ensure persistent TCP connection to stove port 80 is established."""
+        if self._reader is not None and self._writer is not None:
+            if not self._writer.is_closing():
+                return self._reader, self._writer
+            await self._async_close_local_socket()
+
+        host = self.host or DEFAULT_HOST
+        port = self.port or DEFAULT_PORT
+        _LOGGER.debug("Opening persistent TCP connection to %s:%s", host, port)
+        try:
+            self._reader, self._writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port),
+                timeout=5.0,
+            )
+            self._rx_buffer = b""
+            return self._reader, self._writer
+        except Exception as ex:
+            await self._async_close_local_socket()
+            raise ex
+
+    async def _async_close_local_socket(self) -> None:
+        """Safely close and clean up persistent TCP connection."""
+        if self._writer:
+            try:
+                self._writer.close()
+                await self._writer.wait_closed()
+            except Exception as ex:
+                _LOGGER.debug("Error while closing local socket: %s", ex)
+        self._reader = None
+        self._writer = None
+        self._rx_buffer = b""
+
+    async def async_close_local_socket(self) -> None:
+        """Public method to close local socket (e.g. upon integration unload)."""
+        async with self._socket_lock:
+            await self._async_close_local_socket()
+
+    async def _async_read_line(self, reader: asyncio.StreamReader, timeout: float = 3.0) -> str:
+        """Accumulate incoming data in self._rx_buffer, split by \n, and return next complete line.
+
+        Unfinished fragments remain in self._rx_buffer.
+        """
+        while b"\n" not in self._rx_buffer:
+            chunk = await asyncio.wait_for(reader.read(4096), timeout=timeout)
+            if not chunk:  # EOF received
+                raise ConnectionResetError("EOF received from stove socket")
+            self._rx_buffer += chunk
+
+        line_bytes, self._rx_buffer = self._rx_buffer.split(b"\n", 1)
+        return line_bytes.decode("utf-8", errors="ignore").strip()
+
     async def _async_query_local_socket(self) -> List[str]:
-        """Query stove directly over local TCP socket using Dielle 2WL protocol."""
+        """Query stove directly over persistent local TCP socket using Dielle 2WL protocol."""
         host = self.host or DEFAULT_HOST
         port = self.port or DEFAULT_PORT
 
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port),
-            timeout=5.0,
-        )
-        try:
-            # Query command for 2ways live telemetry
-            writer.write(b'["2WL","0"]\n')
-            await writer.drain()
-
-            raw = b""
-            while True:
-                chunk = await asyncio.wait_for(reader.read(4096), timeout=3.0)
-                if not chunk:
-                    break
-                raw += chunk
-                if b"]" in chunk:
-                    break
-
-            text = raw.decode("utf-8", errors="ignore").strip()
-            data = json.loads(text)
-            if isinstance(data, list) and len(data) >= 3:
-                # Format is ["2WL", "25", "10...", "0c81...", ...]
-                return data[2:]
-            elif isinstance(data, list):
-                return data
-            return []
-        finally:
-            writer.close()
+        async with self._socket_lock:
             try:
-                await writer.wait_closed()
-            except Exception:
-                pass
+                reader, writer = await self._async_ensure_local_connection()
+
+                # Query command for 2ways live telemetry
+                writer.write(b'["2WL","0"]\n')
+                await writer.drain()
+
+                # Read lines with newline buffer line-splitting and command-echo filtering
+                start_time = time.time()
+                while time.time() - start_time < 5.0:
+                    line = await self._async_read_line(reader, timeout=3.0)
+                    if not line:
+                        continue
+
+                    # Filter Command-Echoes: replies/echoes starting with ["2WC"
+                    if line.startswith('["2WC"'):
+                        _LOGGER.debug("Ignoring command echo on query stream: %s", line)
+                        continue
+
+                    if line.startswith('["2WL"'):
+                        try:
+                            data = json.loads(line)
+                            if isinstance(data, list) and len(data) >= 3:
+                                # Format is ["2WL", "25", "10...", "0c81...", ...]
+                                return data[2:]
+                            elif isinstance(data, list):
+                                return data
+                        except json.JSONDecodeError:
+                            _LOGGER.warning("Malformed JSON in 2WL telemetry: %s", line)
+                            continue
+
+                raise asyncio.TimeoutError("Timeout waiting for 2WL telemetry response")
+
+            except (ConnectionResetError, BrokenPipeError, ConnectionError, OSError, asyncio.TimeoutError) as ex:
+                _LOGGER.warning(
+                    "Local TCP socket error on %s:%s (%s). Closing persistent socket for next poll.",
+                    host,
+                    port,
+                    ex,
+                )
+                await self._async_close_local_socket()
+                raise
 
     async def async_authenticate_cloud(self) -> str:
         """Authenticate with Dielle Azure Cloud and retrieve Bearer token."""
@@ -199,8 +280,78 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
         raise UpdateFailed(f"Konnte Telemetrie nicht von Cloud abrufen: {last_error}")
 
+    async def async_load(self) -> None:
+        """Load persistent pellet storage from Home Assistant Store (Hürde 3.1)."""
+        if self._store_loaded:
+            return
+        self._store_loaded = True
+        try:
+            stored = await self._store.async_load()
+            if stored and isinstance(stored, dict):
+                if "pellet_level_kg" in stored:
+                    self.pellet_level = float(stored["pellet_level_kg"])
+                elif "pellet_level" in stored:
+                    self.pellet_level = float(stored["pellet_level"])
+
+                today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                if stored.get("last_consumption_date") == today_str:
+                    self.daily_consumption = float(stored.get("daily_consumption_kg", 0.0))
+                else:
+                    self.daily_consumption = 0.0
+                    self.last_consumption_date = today_str
+
+                _LOGGER.info(
+                    "SmartHeat: Persistenter Pellettank-Füllstand erfolgreich geladen: %.2f kg (Tagesverbrauch: %.2f kg)",
+                    self.pellet_level,
+                    self.daily_consumption,
+                )
+            else:
+                _LOGGER.info(
+                    "SmartHeat: Keine persistenten Pellet-Daten gefunden. Initialisiere mit Standardwert 15.0 kg."
+                )
+                self.pellet_level = 15.0
+                today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                self.last_consumption_date = today_str
+                self.daily_consumption = 0.0
+                await self.async_save_pellet_storage()
+        except Exception as ex:
+            _LOGGER.warning("SmartHeat: Fehler beim Laden des Pellet-Speichers: %s. Verwende 15.0 kg.", ex)
+            self.pellet_level = 15.0
+
+    async def async_save_pellet_storage(self) -> None:
+        """Save pellet state persistently to Home Assistant storage."""
+        if not self._store:
+            return
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        data = {
+            "pellet_level_kg": round(self.pellet_level, 2),
+            "pellet_level_percent": round((self.pellet_level / self.tank_capacity) * 100.0, 1),
+            "daily_consumption_kg": round(self.daily_consumption, 2),
+            "last_consumption_date": today_str,
+            "last_saved": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            await self._store.async_save(data)
+            _LOGGER.debug("SmartHeat: Pellet-Füllstand persistent gespeichert: %.2f kg", self.pellet_level)
+        except Exception as ex:
+            _LOGGER.warning("SmartHeat: Fehler beim Speichern des Pellet-Füllstands: %s", ex)
+
+    async def async_set_pellet_level(self, level: float) -> None:
+        """Set current pellet level in kg and write persistently to store (Hürde 3.1)."""
+        self.pellet_level = max(0.0, min(self.tank_capacity, float(level)))
+        await self.async_save_pellet_storage()
+        if self.data:
+            self.data["pellet_level_kg"] = round(self.pellet_level, 2)
+            self.data["pellet_percent"] = round((self.pellet_level / self.tank_capacity) * 100.0, 1)
+            self.async_set_updated_data(self.data)
+        else:
+            self.async_update_listeners()
+
     async def _async_update_data(self) -> Dict[str, Any]:
         """Fetch latest telemetry from Local Socket or Cloud and decode hex values."""
+        if not self._store_loaded:
+            await self.async_load()
+
         raw_blocks: List[str] = []
         is_online = True
 
@@ -224,6 +375,9 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
             raise UpdateFailed("Keine gültigen Telemetrieblöcke vom Ofen erhalten")
 
         parsed = self._decode_telemetry_blocks(raw_blocks, is_online=is_online)
+        if self._pellet_level_changed:
+            self._pellet_level_changed = False
+            await self.async_save_pellet_storage()
         return parsed
 
     def _decode_telemetry_blocks(self, values: List[str], is_online: bool = True) -> Dict[str, Any]:
@@ -273,7 +427,7 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
                             pass
 
                 tp_raw = _extract_signed_int16(block, 20)
-                if tp_raw is not None and tp_raw > 0 and tp_raw != -127:
+                if tp_raw is not None and tp_raw >= -400 and tp_raw <= 1200 and tp_raw != -1270:
                     room_temp = round(float(tp_raw) * mult_temp, 1)
 
                 ts_raw = _extract_signed_int16(block, 6)
@@ -408,8 +562,35 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
             effective_power = 1
             effective_display = f"Stufe 1 ({STATUS_MAPPINGS.get(status_code, 'Betrieb')})"
 
-        # Pellet consumption tracking
+        # Pellet consumption tracking & Primer deduction (Hürden 3.1 & 3.2)
         now = datetime.now(timezone.utc)
+        today_str = now.strftime("%Y-%m-%d")
+        if self.last_consumption_date != today_str:
+            self.daily_consumption = 0.0
+            self.last_consumption_date = today_str
+
+        # Hürde 3.2: Zündungs-Primer Abzug von 200g bei Verbrennungsstart
+        # Wenn der Ofenstatus von 0 (Aus) oder 9/11 (Standby) auf 1 (Zündung Start) oder 2 (Zündung Pellets) wechselt
+        if status_code in (0, 9, 11):
+            self._ignition_primer_deducted = False
+
+        was_off_or_standby = (self._previous_status_code is not None and self._previous_status_code in (0, 9, 11))
+        is_ignition_starting = (status_code in (1, 2))
+
+        if was_off_or_standby and is_ignition_starting and not self._ignition_primer_deducted:
+            self.pellet_level = max(0.0, self.pellet_level - 0.20)
+            self.daily_consumption += 0.20
+            self._ignition_primer_deducted = True
+            self._pellet_level_changed = True
+            _LOGGER.info(
+                "SmartHeat: Zündungs-Primer 0.20 kg abgezogen (Statuswechsel %s -> %s). Neuer Füllstand: %.2f kg",
+                self._previous_status_code,
+                status_code,
+                self.pellet_level,
+            )
+
+        self._previous_status_code = status_code
+
         hourly_rate = 0.0
         if not is_wood and status_code in (1, 2, 3, 4, 5, 6) and effective_power > 0:
             hourly_rate = CONSUMPTION_RATES.get(effective_power, 0.65)
@@ -418,7 +599,10 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
                 elapsed_seconds = (now - self.last_update_time).total_seconds()
                 if 0 < elapsed_seconds < 300:  # reasonable interval
                     consumed_kg = (hourly_rate / 3600.0) * elapsed_seconds
-                    self.pellet_level = max(0.0, self.pellet_level - consumed_kg)
+                    if consumed_kg > 0:
+                        self.pellet_level = max(0.0, self.pellet_level - consumed_kg)
+                        self.daily_consumption += consumed_kg
+                        self._pellet_level_changed = True
 
         self.last_update_time = now
 
@@ -485,37 +669,33 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
             "pellet_percent": pellet_percent,
             "pellet_remaining_hours": remaining_hours,
             "consumption_rate": hourly_rate,
+            "daily_consumption": round(self.daily_consumption, 2),
         }
 
     async def async_send_command(self, cmd_hex: str, skip_immediate_refresh: bool = False) -> bool:
         """Send a 2WC command string via Local TCP socket or Cloud."""
-        # 1. Local socket sending
+        # 1. Local socket sending via persistent connection
         if self.host:
-            host = self.host
-            port = self.port or DEFAULT_PORT
             payload = f'["2WC","1","{cmd_hex}"]\n'
             try:
-                reader, writer = await asyncio.wait_for(
-                    asyncio.open_connection(host, port),
-                    timeout=5.0,
-                )
-                writer.write(payload.encode("utf-8"))
-                await writer.drain()
+                async with self._socket_lock:
+                    reader, writer = await self._async_ensure_local_connection()
+                    writer.write(payload.encode("utf-8"))
+                    await writer.drain()
 
-                raw = b""
-                while True:
-                    chunk = await asyncio.wait_for(reader.read(4096), timeout=3.0)
-                    if not chunk:
-                        break
-                    raw += chunk
-                    if b"]" in chunk:
-                        break
-
-                writer.close()
-                try:
-                    await writer.wait_closed()
-                except Exception:
-                    pass
+                    # Wait for command echo/ack with line-splitting
+                    start_t = time.time()
+                    while time.time() - start_t < 3.0:
+                        try:
+                            line = await self._async_read_line(reader, timeout=2.0)
+                            if line.startswith('["2WC"'):
+                                _LOGGER.info("Local command %s confirmed by echo: %s", cmd_hex, line)
+                                break
+                            elif line.startswith('["2WL"'):
+                                # A telemetry packet arrived, confirming transmission
+                                break
+                        except asyncio.TimeoutError:
+                            break
 
                 _LOGGER.info("Local command %s successfully sent to stove", cmd_hex)
                 if not skip_immediate_refresh:
@@ -524,6 +704,7 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
                 return True
             except Exception as ex:
                 _LOGGER.error("Failed to send local command %s: %s", cmd_hex, ex)
+                await self._async_close_local_socket()
 
         # 2. Cloud sending
         if self.username and self.password and self.device_id:
@@ -580,8 +761,8 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         return await self.async_send_command_with_burst(cmd)
 
     async def async_set_flur_fan(self, speed: int) -> bool:
-        """Set Flur Luftheizung fan speed (0=Aus, 1..6=P1..P6, 7=Auto) with optimistic lock and burst verification."""
-        speed_clamped = max(0, min(7, speed))
+        """Set Flur Luftheizung fan speed (0=Aus, 1..5=P1..P5, 6=Auto) with optimistic lock and burst verification."""
+        speed_clamped = max(0, min(6, speed))
         self.pending_flur_fan = speed_clamped
         self.pending_flur_fan_time = time.time()
         if self.data:
@@ -624,6 +805,7 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
             self.data["pellet_level_kg"] = round(self.pellet_level, 2)
             self.data["pellet_percent"] = round((self.pellet_level / self.tank_capacity) * 100.0, 1)
         self.async_set_updated_data(self.data)
+        self.hass.async_create_task(self.async_save_pellet_storage())
 
     def refill_full(self) -> None:
         """Refill tank to full 20kg."""
@@ -632,3 +814,4 @@ class SmartHeatCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
             self.data["pellet_level_kg"] = round(self.pellet_level, 2)
             self.data["pellet_percent"] = 100.0
         self.async_set_updated_data(self.data)
+        self.hass.async_create_task(self.async_save_pellet_storage())

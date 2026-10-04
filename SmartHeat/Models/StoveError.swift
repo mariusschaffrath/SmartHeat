@@ -105,41 +105,41 @@ public struct DielleHardwareAlarm: Identifiable, Equatable {
             return DielleHardwareAlarm(
                 code: 1,
                 codeString: "Er01",
-                title: "Stromausfall (Blackout)",
-                description: "Während des Betriebs ist der Netzstrom kurzzeitig ausgefallen.",
-                remedy: "Prüfe Stromanschluss und Sicherung. Tippe auf 'Entsperren', um den Alarm zu quittieren."
+                title: "Überhitzungsthermostat Kessel/Wasser",
+                description: "Überhitzung Wassertasche / Kesselkörper festgestellt.",
+                remedy: "Abkühlung abwarten, Pumpe & Vorlauf prüfen. Tippe auf 'Entsperren', um den Alarm zu quittieren."
             )
         case 2:
             return DielleHardwareAlarm(
                 code: 2,
                 codeString: "Er02",
-                title: "Fehlzündung (Keine Zündung)",
-                description: "Die Zündphase wurde abgebrochen, da die Mindest-Abgastemperatur nicht rechtzeitig erreicht wurde.",
-                remedy: "1. Brennertopf reinigen.\n2. Pelletzufuhr prüfen.\n3. Auf 'Entsperren' tippen und Zündung erneut starten."
+                title: "Sicherheitsdruckwächter Wasserdruck",
+                description: "Druckfehler im Wasserkreislauf.",
+                remedy: "Anlagendruck prüfen (Soll: 1.2–1.5 bar) und Alarm quittieren."
             )
         case 3:
             return DielleHardwareAlarm(
                 code: 3,
                 codeString: "Er03",
-                title: "Pellets leer / Flamme erloschen",
-                description: "Der Brennertopf erhält keine Pellets mehr oder die Flamme ist im Heizbetrieb erloschen.",
-                remedy: "1. Pelletbehälter auffüllen.\n2. Förderschnecke prüfen.\n3. Auf 'Entsperren' tippen."
+                title: "Erloschene Flamme / Pellets leer",
+                description: "Keine Flamme im Heizbetrieb oder Pellettank leer.",
+                remedy: "Pellets nachfüllen, Brenner kontrollieren und auf 'Entsperren' tippen."
             )
         case 4:
             return DielleHardwareAlarm(
                 code: 4,
                 codeString: "Er04",
-                title: "Sicherheitsthermostat ausgelöst",
-                description: "Die Temperatur im Pelletbehälter oder Gehäuse hat den Maximalwert überschritten.",
-                remedy: "Ofen abkühlen lassen. Lüftungsschlitze frei halten. Gegebenenfalls thermischen Sicherheitsschalter prüfen."
+                title: "Fehlzündung",
+                description: "Temperaturanstieg bei Zündung zu gering.",
+                remedy: "Brennraum reinigen, Glühkerze prüfen und Zündung erneut starten."
             )
         case 5:
             return DielleHardwareAlarm(
                 code: 5,
                 codeString: "Er05",
-                title: "Abgastemperatur zu hoch",
-                description: "Die Abgastemperatur hat den zulässigen Grenzwert überschritten.",
-                remedy: "Lass den Ofen abkühlen. Prüfe Wärmetauscher und Kaminrohr auf Verrußung."
+                title: "Rauchgastemperaturfühler defekt",
+                description: "Rauchgastemperaturfühler defekt oder unterbrochen.",
+                remedy: "Fühleranschluss an Platine sowie Verkabelung prüfen."
             )
         case 6:
             return DielleHardwareAlarm(
@@ -157,29 +157,45 @@ public struct DielleHardwareAlarm: Identifiable, Equatable {
                 description: "Der Drehzahlgeber (Encoder) des Abgasventilators meldet eine Blockade oder Unregelmäßigkeit.",
                 remedy: "Rauchgasventilator auf Verschmutzung oder mechanische Blockade prüfen."
             )
+        case 8:
+            return DielleHardwareAlarm(
+                code: 8,
+                codeString: "Er08",
+                title: "Rauchgas-Übertemperatur",
+                description: "Die Rauchgastemperatur hat den zulässigen Maximalwert überschritten.",
+                remedy: "Ofen abkühlen lassen, Wärmetauscher und Kaminrohr auf Verrußung prüfen."
+            )
         case 12:
             return DielleHardwareAlarm(
                 code: 12,
                 codeString: "Er12",
                 title: "Pelletmangel / Dosierer",
-                description: "Die Pelletförderung konnte den Brennertopf nicht ausreichend befüllen.",
-                remedy: "Pellets nachfüllen und Alarm quittieren."
+                description: "Pelletförderung unzureichend oder Zündtopf nicht befüllt.",
+                remedy: "Pelletbehälter prüfen, Pellets nachfüllen und Alarm quittieren."
             )
         case 39:
             return DielleHardwareAlarm(
                 code: 39,
                 codeString: "Er39",
-                title: "Unterdruckwächter ausgelöst",
-                description: "Der Druckwächter meldet unzureichenden Schornsteinzug oder eine geöffnete Tür.",
-                remedy: "1. Brennraumtür und Aschelade fest verschließen.\n2. Dichtungen und Kaminabzug prüfen.\n3. Auf 'Entsperren' tippen."
+                title: "Unterdruckwächter Brennraum / Kaminzug",
+                description: "Schornsteinzug unzureichend oder Brennraumtür/Aschelade undicht.",
+                remedy: "Brennraumtür schließen, Dichtungen und Schornsteinzug prüfen."
             )
         case 41:
             return DielleHardwareAlarm(
                 code: 41,
                 codeString: "Er41",
                 title: "Luftstrom-Minimum unterschritten",
-                description: "Die Verbrennungsluftzufuhr ist unzureichend.",
-                remedy: "Lufteinlass auf Verstopfung prüfen."
+                description: "Verbrennungsluftstrom liegt unter dem Schwellwert.",
+                remedy: "Luftansaugrohr und Gebläse auf Verstopfung prüfen."
+            )
+        case 42:
+            return DielleHardwareAlarm(
+                code: 42,
+                codeString: "Er42",
+                title: "Maximaler Luftstrom / Tür offen",
+                description: "Luftstrom über Schwellwert oder Brennraumtür steht offen.",
+                remedy: "Brennraumtür schließen und Sensor prüfen."
             )
         default:
             let codeFormatted = String(format: "Er%02d", code)

@@ -133,6 +133,8 @@ public class HomeAssistantService: ObservableObject {
         self.pelletEntityId = UserDefaults.standard.string(forKey: pelletEntityKey) ?? "sensor.smartheat_pellet_vorrat"
     }
     
+    nonisolated deinit {}
+    
     // MARK: - API Helpers
     private func cleanURL(_ path: String) -> URL? {
         let base = serverURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -194,8 +196,8 @@ public class HomeAssistantService: ObservableObject {
         }
     }
     
-    // MARK: - Fetch 24/7 Temperature History
-    public func fetchTemperatureHistory(days: Int = 30) async throws -> (room: [TemperaturePoint], exhaust: [TemperaturePoint]) {
+    // MARK: - Fetch 24/7 Temperature History (Hürde 5.2: Begrenzung auf 48h für performanten Start)
+    public func fetchTemperatureHistory(days: Int = 2) async throws -> (room: [TemperaturePoint], exhaust: [TemperaturePoint]) {
         guard isEnabled, !accessToken.isEmpty else {
             throw NSError(domain: "SmartHeat", code: 400, userInfo: [NSLocalizedDescriptionKey: "Home Assistant ist nicht aktiviert oder Token fehlt."])
         }

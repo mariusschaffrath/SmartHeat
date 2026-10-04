@@ -29,8 +29,7 @@ FAN_MODE_MAPPINGS = {
     "Stufe 3": 3,
     "Stufe 4": 4,
     "Stufe 5": 5,
-    "Stufe 6": 6,
-    "Auto": 7,
+    "Auto": 6,
 }
 REVERSE_FAN_MAPPINGS = {
     0: "Aus",
@@ -39,8 +38,7 @@ REVERSE_FAN_MAPPINGS = {
     3: "Stufe 3",
     4: "Stufe 4",
     5: "Stufe 5",
-    6: "Stufe 6",
-    7: "Auto",
+    6: "Auto",
 }
 
 

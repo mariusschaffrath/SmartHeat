@@ -170,13 +170,27 @@ public struct HardwareChronoPlan: Codable, Equatable {
     public func toCCSCommandString() -> String {
         var elements: [String] = ["\"CCS\"", "\"71\"", "\"\(mode.rawValue)\""]
         
-        // Always 7 days
-        for day in days {
-            elements.append("\"\(day.id)\"")
-            for slot in day.slots.prefix(3) {
-                elements.append("\"\(slot.startTime)\"")
-                elements.append("\"\(slot.endTime)\"")
-                elements.append("\"\(slot.isEnabled ? "1" : "0")\"")
+        // Exakt 7 Tage (1..7) mit jeweils exakt 3 Slots (notfalls mit 00:00 aufgefüllt),
+        // damit exakt 71 Parameter für das TiEmme-EEPROM übertragen werden.
+        for dayId in 1...7 {
+            elements.append("\"\(dayId)\"")
+            let day = days.first(where: { $0.id == dayId })
+            let daySlots = day?.slots ?? []
+            
+            for slotIndex in 0..<3 {
+                if slotIndex < daySlots.count {
+                    let slot = daySlots[slotIndex]
+                    let start = slot.startTime.isEmpty ? "00:00" : slot.startTime
+                    let end = slot.endTime.isEmpty ? "00:00" : slot.endTime
+                    elements.append("\"\(start)\"")
+                    elements.append("\"\(end)\"")
+                    elements.append("\"\(slot.isEnabled ? "1" : "0")\"")
+                } else {
+                    // Fehlende Slots mit 00:00 auffüllen
+                    elements.append("\"00:00\"")
+                    elements.append("\"00:00\"")
+                    elements.append("\"0\"")
+                }
             }
         }
         

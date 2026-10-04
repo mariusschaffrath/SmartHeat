@@ -24,6 +24,16 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
     func startScanning() {
         guard centralManager.state == .poweredOn else { return }
         centralManager.scanForPeripherals(withServices: [serviceUUID], options: nil)
+        
+        // Auto-stop after 10 seconds to prevent Bluetooth radio from draining battery
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            self?.stopScanning()
+        }
+    }
+    
+    func stopScanning() {
+        centralManager.stopScan()
     }
     
     func connect(to peripheral: CBPeripheral) {
@@ -44,9 +54,7 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
         let state = central.state
         Task { @MainActor in
             isBluetoothEnabled = (state == .poweredOn)
-            if state == .poweredOn {
-                startScanning()
-            }
+            // Akku-Optimierung: Kein dauerhaftes Auto-Scanning im Hintergrund!
         }
     }
     

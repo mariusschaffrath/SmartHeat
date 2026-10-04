@@ -203,6 +203,9 @@ public struct TurnOffStoveIntent: AppIntent {
             return .result(dialog: "Bitte öffne die SmartHeat App zum Anmelden.")
         }
         
+        // Hürde 5.1: Sicherheitsabfrage vor Abschaltung
+        try await requestConfirmation(result: .result(dialog: "Möchtest du den Pelletofen wirklich ausschalten?"))
+        
         do {
             try await CloudService.shared.sendCommand(deviceKey: deviceKey, token: token, command: .turnOff)
             return .result(dialog: "Der Pelletofen schaltet jetzt aus.")

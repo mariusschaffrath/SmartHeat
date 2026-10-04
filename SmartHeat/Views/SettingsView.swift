@@ -161,6 +161,78 @@ struct SettingsView: View {
                     .disabled(isSendingTestNotification)
                 }
                 
+                Section(header: Text("Verbindung & Cloud-Synchronisation")) {
+                    HStack {
+                        Label("Aktiver Pfad:", systemImage: "cloud.fill")
+                        Spacer()
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(viewModel.authService.isAuthenticated ? Color.blue : Color.orange)
+                                .frame(width: 8, height: 8)
+                            Text("Dielle Cloud (Exklusiv)")
+                                .font(.subheadline.bold())
+                                .foregroundColor(.blue)
+                        }
+                    }
+                    
+                    HStack {
+                        Text("Cloud-Status:")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(viewModel.authService.isAuthenticated ? "Verbunden & Aktiv" : "Nicht angemeldet")
+                            .font(.caption.bold())
+                            .foregroundColor(viewModel.authService.isAuthenticated ? .green : .orange)
+                    }
+                    
+                    HStack {
+                        Text("Polling-Intervall:")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(String(format: "%.0fs (%@)", viewModel.currentPollingInterval, viewModel.isStoveActive ? "Aktiv" : (viewModel.isUserInteracting ? "Bedienung" : "Eco-Standby")))
+                            .font(.caption.bold())
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Toggle(isOn: $viewModel.isEcoModeEnabled) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Intelligentes Eco-Polling")
+                                .font(.subheadline.bold())
+                            Text(viewModel.isEcoModeEnabled ? "Spart bis zu 75% iPhone-Akku bei kaltem/ausgeschaltetem Ofen (30s Takt)." : "Permanenter 10s Takt.")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .tint(.green)
+                    
+                    if viewModel.isLowPowerMode {
+                        HStack(spacing: 6) {
+                            Image(systemName: "battery.50percent")
+                                .foregroundColor(.yellow)
+                            Text("iOS Stromsparmodus aktiv: Polling automatisch energieoptimiert.")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.shield.fill")
+                                .foregroundColor(.blue)
+                                .font(.caption)
+                            Text("Exklusiver Cloud-Betrieb")
+                                .font(.caption.bold())
+                                .foregroundColor(.primary)
+                        }
+                        
+                        Text("Die lokale Port-80-Synchronisation wurde vollständig deaktiviert. Alle Statusabfragen und Steuerungsbefehle laufen dauerhaft, stabil und ortsunabhängig über die offizielle Dielle Azure Cloud – ohne Hin- und Herspringen im WLAN.")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+                
                 Section(header: Text("Ofen-Konfiguration")) {
                     Toggle("Wassergeführter Ofen", isOn: $viewModel.isWaterStove)
                         .tint(.blue)

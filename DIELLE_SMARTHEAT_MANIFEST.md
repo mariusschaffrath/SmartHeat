@@ -242,7 +242,9 @@ Die Platine meldet Alarme in Block 0 (Offset 12..14). SmartHeat decodiert alle D
 | **Er03** | Erloschene Flamme | Keine Flamme im Heizbetrieb / Pellettank leer | Pellets nachfüllen, Brenner kontrollieren |
 | **Er04** | Fehlzündung | Temperaturanstieg bei Zündung zu gering | Brennraum reinigen, Glühkerze prüfen |
 | **Er05** | Rauchgastemperaturfühler | Fühler defekt oder unterbrochen | Fühleranschluss an Platine prüfen |
-| **Er12** | Zündungsfehler | Zündung innerhalb Maximalzeit fehlgeschlagen | Zündtopf kontrollieren, Zündung wiederholen |
+| **Er07** | Abgasgebläse | Drehzahlfehler / Geber meldet Blockade | Rauchgasventilator auf Verschmutzung/Blockade prüfen |
+| **Er08** | Rauchgas-Übertemperatur | Rauchgastemperatur überschreitet Grenzwert | Abkühlung abwarten, Wärmetauscher reinigen |
+| **Er12** | Pelletmangel / Dosierer | Zündung fehlgeschlagen / Pellets leer | Zündtopf kontrollieren, Pellets nachfüllen |
 | **Er39** | Unterdruckwächter | Schornsteinzug unzureichend / Tür undicht | Dichtung prüfen, Rauchrohr reinigen |
 | **Er41** | Mindest-Luftstrom | Verbrennungsluftstrom unter Schwellwert | Luftansaugrohr und Gebläse prüfen |
 | **Er42** | Maximaler Luftstrom | Luftstrom über Schwellwert / Tür offen | Brennraumtür schließen, Sensor prüfen |
@@ -260,6 +262,7 @@ Entsperrung erfolgt über das dedizierte Sblocco-Kommando `050a0000`.
 | `sensor.smartheat_solltemperatur` | Sensor | Solltemperatur | °C | Eingestellte Zieltemperatur |
 | `sensor.smartheat_abgastemperatur` | Sensor | Abgastemperatur | °C | Abgastemperatur im Rauchrohr |
 | `sensor.smartheat_betriebsstatus` | Sensor | Betriebsstatus | Text | Status 0..13 (Aus, Zündung, Heizbetrieb, Modulation etc.) |
+| `sensor.smartheat_alarm` | Sensor | Alarm | Text | Hardware-Alarmstatus mit Attributen (Er01–Er42) |
 | `sensor.smartheat_leistungsstufe` | Sensor | Leistungsstufe | 1..6 | Soll-Vorgabe (1..5 manuell, 6 = Auto) |
 | `sensor.smartheat_aktuelle_istleistung` | Sensor | Aktuelle Ist-Leistung | Text | Dynamische Modulation: `Stufe 4 (Auto / Gebläse)` etc. |
 | `sensor.smartheat_pellet_verbrauch_stundlich`| Sensor | Pellet-Verbrauch stündlich| kg/h | Momentaner Verbrauch (0.0 bis 2.25 kg/h) |

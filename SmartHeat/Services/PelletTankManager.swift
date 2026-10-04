@@ -26,8 +26,11 @@ public class PelletTankManager: ObservableObject {
     
     @Published public var currentLevel: Double {
         didSet {
-            let clamped = max(0.0, min(tankCapacity, currentLevel))
-            if clamped != currentLevel { currentLevel = clamped }
+            let clamped = min(tankCapacity, max(0.0, currentLevel))
+            if currentLevel != clamped {
+                currentLevel = clamped
+                return
+            }
             UserDefaults.standard.set(currentLevel, forKey: "pellet_current_level")
         }
     }
@@ -47,6 +50,9 @@ public class PelletTankManager: ObservableObject {
         }
     }
     
+    @Published public private(set) var isIgnitionPrimerDeducted: Bool = false
+    @Published public var dailyConsumption: Double = 0.0
+    
     private var lastTrackingDate: Date?
     private var previousStatus: Int = 0
     
@@ -60,6 +66,8 @@ public class PelletTankManager: ObservableObject {
             self.lastRefillDate = Date(timeIntervalSince1970: savedRefill)
         }
     }
+    
+    nonisolated deinit {}
     
     // MARK: - Home Assistant 24/7 Integration
     public func syncFromHomeAssistant(levelKg: Double) {
@@ -120,12 +128,18 @@ public class PelletTankManager: ObservableObject {
         self.isWoodModeActive = isWood
         self.currentPowerLevel = max(1, min(5, powerLevel))
         
-        // Handle Ignition cycle: deduct primer pellet volume once upon switching from OFF/Standby to Ignition
-        let isIgniting = (statusCode == 2 || statusCode == 4 || (30...34).contains(statusCode))
-        let wasOffOrStandby = (previousStatus == 0 || previousStatus == 11)
+        // Handle Ignition cycle: deduct primer pellet volume (0.20 kg) once upon switching from OFF/Standby to Ignition (Hürde 3.2)
+        if statusCode == 0 || statusCode == 9 || statusCode == 11 {
+            isIgnitionPrimerDeducted = false
+        }
         
-        if wasOffOrStandby && isIgniting {
+        let wasOffOrStandby = (previousStatus == 0 || previousStatus == 9 || previousStatus == 11)
+        let isIgnitionPhase = (statusCode == 1 || statusCode == 2 || statusCode == 3 || statusCode == 4 || (30...34).contains(statusCode))
+        
+        if wasOffOrStandby && isIgnitionPhase && !isIgnitionPrimerDeducted {
             currentLevel = max(0, currentLevel - Self.defaultIgnitionCost)
+            dailyConsumption += Self.defaultIgnitionCost
+            isIgnitionPrimerDeducted = true
         }
         previousStatus = statusCode
         
@@ -137,13 +151,14 @@ public class PelletTankManager: ObservableObject {
         let deltaSeconds = now.timeIntervalSince(last)
         lastTrackingDate = now
         
-        // Only track active burning (Status 5 = Betrieb, 6 = Modulation), and pause when burning firewood
+        // Only track active burning (Status 5 = Heizbetrieb, 6 = Modulation), and pause when burning firewood
         if (statusCode == 5 || statusCode == 6) && !isWood && deltaSeconds > 0 && deltaSeconds < 3600 {
             let activeRateLevel = (statusCode == 6) ? 1 : self.currentPowerLevel
             let hourlyRate = Self.ghibli10kWConsumptionRates[activeRateLevel] ?? 0.65
             let consumed = (hourlyRate / 3600.0) * deltaSeconds
             if consumed > 0 {
                 currentLevel = max(0, currentLevel - consumed)
+                dailyConsumption += consumed
             }
         }
     }

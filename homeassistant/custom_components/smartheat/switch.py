@@ -48,10 +48,29 @@ class SmartHeatPowerSwitch(CoordinatorEntity[SmartHeatCoordinator], SwitchEntity
 
     @property
     def is_on(self) -> bool:
-        """Return true if stove is currently running (status > 0)."""
+        """Return true if stove is currently in an active operating state (Hürde 3.5).
+        
+        Active states (True):
+        - Status 1: Zündung Start (Phase 1)
+        - Status 2: Zündung Pellets (Phase 2)
+        - Status 3: Flamme (Phase 3)
+        - Status 4: Stabilisierung
+        - Status 5: Heizbetrieb
+        - Status 6: Modulation
+        - Status 13: Scheitholzbetrieb
+        
+        Inactive / Off states (False):
+        - Status 0: Aus
+        - Status 8: Ausbrand
+        - Status 9: Standby (and Status 11: Standby)
+        - Safety shutdowns: Status 7 (Ausschalten), 10 (Warten/Sicherheit), 12 (Ascheentleerung)
+        """
         if not self.coordinator.data:
             return False
-        return self.coordinator.data.get("status_code", 0) > 0
+        status_code = self.coordinator.data.get("status_code", 0)
+        if status_code in (1, 2, 3, 4, 5, 6, 13):
+            return True
+        return False
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the stove on."""

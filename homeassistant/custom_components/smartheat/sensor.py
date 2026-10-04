@@ -17,7 +17,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, DIELLE_ALARM_MAPPINGS
 from .coordinator import SmartHeatCoordinator
 
 
@@ -144,6 +144,22 @@ SENSOR_DESCRIPTIONS: tuple[SmartHeatSensorEntityDescription, ...] = (
         icon="mdi:wood",
         value_fn=lambda d: "Aktiv" if d.get("is_wood_mode") else "Inaktiv",
     ),
+    SmartHeatSensorEntityDescription(
+        key="daily_consumption",
+        name="Pellet-Tagesverbrauch",
+        object_id="pellet_tagesverbrauch",
+        native_unit_of_measurement=UnitOfMass.KILOGRAMS,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        icon="mdi:chart-timeline-variant",
+        value_fn=lambda d: d.get("daily_consumption"),
+    ),
+    SmartHeatSensorEntityDescription(
+        key="alarm",
+        name="Alarm",
+        object_id="alarm",
+        icon="mdi:alert-octagon",
+        value_fn=lambda d: DIELLE_ALARM_MAPPINGS.get(d.get("error_code", 0), {}).get("name", "Kein Fehler" if d.get("error_code", 0) == 0 else f"Er{d.get('error_code', 0):02d}"),
+    ),
 )
 
 
@@ -184,8 +200,14 @@ class SmartHeatSensor(CoordinatorEntity[SmartHeatCoordinator], SensorEntity):
 
     @property
     def native_value(self) -> Any:
-        """Return native sensor value from coordinator data."""
+        """Return native sensor value from coordinator data with immediate restore fallback."""
         if not self.coordinator.data:
+            if self.entity_description.key == "pellet_level_kg":
+                return round(self.coordinator.pellet_level, 2)
+            if self.entity_description.key == "pellet_percent":
+                return round((self.coordinator.pellet_level / self.coordinator.tank_capacity) * 100.0, 1)
+            if self.entity_description.key == "daily_consumption":
+                return round(self.coordinator.daily_consumption, 2)
             return None
         return self.entity_description.value_fn(self.coordinator.data)
 
@@ -212,6 +234,16 @@ class SmartHeatSensor(CoordinatorEntity[SmartHeatCoordinator], SensorEntity):
                 "verbrauch_kgh": data.get("consumption_rate"),
                 "delta_t": data.get("delta_temp"),
                 "geblase_brennraum_max": max(data.get("fan_luftzufuhr1", 1), data.get("fan_luftzufuhr2", 1)),
+            }
+        elif self.entity_description.key == "alarm":
+            err_code = data.get("error_code", 0)
+            alarm_info = DIELLE_ALARM_MAPPINGS.get(err_code, {})
+            return {
+                "error_code": err_code,
+                "code_string": f"Er{err_code:02d}" if err_code > 0 else "None",
+                "name": alarm_info.get("name", "Kein Alarm" if err_code == 0 else f"Unbekannter Fehler ({err_code})"),
+                "beschreibung": alarm_info.get("beschreibung", "Keine Störung aktiv." if err_code == 0 else "Unbekannter Fehlercode."),
+                "abhilfe": alarm_info.get("abhilfe", "Keine Maßnahme erforderlich." if err_code == 0 else "Ofen prüfen und entsperren."),
             }
         return None
 
